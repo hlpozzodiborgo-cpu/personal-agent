@@ -31,6 +31,23 @@ if [ ! -d "backend/venv" ] || [ ! -d "frontend/node_modules" ]; then
     exit 1
 fi
 
+# Libérer les ports si déjà occupés
+echo "🔍 Vérification des ports..."
+BACKEND_PORT_PID=$(lsof -ti:8000 2>/dev/null)
+FRONTEND_PORT_PID=$(lsof -ti:3000 2>/dev/null)
+
+if [ -n "$BACKEND_PORT_PID" ]; then
+    echo "⚠️  Port 8000 occupé (PID $BACKEND_PORT_PID) — arrêt en cours..."
+    kill $BACKEND_PORT_PID 2>/dev/null
+    sleep 1
+fi
+
+if [ -n "$FRONTEND_PORT_PID" ]; then
+    echo "⚠️  Port 3000 occupé (PID $FRONTEND_PORT_PID) — arrêt en cours..."
+    kill $FRONTEND_PORT_PID 2>/dev/null
+    sleep 1
+fi
+
 # Backend
 print_header "Backend"
 cd backend
@@ -40,14 +57,21 @@ BACKEND_PID=$!
 cd ..
 
 # Frontend
-print_header "Frontend"  
+print_header "Frontend"
 cd frontend
 npm run dev &
 FRONTEND_PID=$!
 cd ..
 
+# Déterminer l'URL d'accès
+if grep -q "investor-app" /etc/hosts 2>/dev/null; then
+    APP_URL="http://investor-app:3000"
+else
+    APP_URL="http://localhost:3000"
+fi
+
 print_header "Application Lancée!"
-echo "📊 Dashboard:  http://localhost:3000"
+echo "📊 Dashboard:  $APP_URL"
 echo "📚 API Docs:   http://localhost:8000/docs"
 echo "🏥 API Health: http://localhost:8000/health"
 echo ""

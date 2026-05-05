@@ -31,9 +31,10 @@ class Holding(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     asset_id = Column(Integer, ForeignKey("assets.id"))
-    quantity = Column(Float)  # Nombre d'actions/pièces
-    avg_purchase_price = Column(Float)  # Prix moyen d'achat
-    total_cost = Column(Float)  # Investissement total
+    quantity = Column(Float)
+    avg_purchase_price = Column(Float)
+    total_cost = Column(Float)
+    purchase_date = Column(DateTime, nullable=True)   # Date réelle d'achat
     date_added = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)

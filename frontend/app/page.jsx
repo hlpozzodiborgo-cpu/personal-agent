@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
-import { getPortfolio, getAssets, checkHealth } from '@/lib/api'
+import { getPortfolio, getAssets, checkHealth, removeHolding } from '@/lib/api'
 import { PortfolioSummary, HoldingsList, TopPerformers } from '@/components/PortfolioComponents'
 import { AddAssetModal, AddHoldingModal } from '@/components/Modals'
 
@@ -11,6 +11,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [apiHealth, setApiHealth] = useState(null)
+  const [deleting, setDeleting] = useState(false)
   
   // Modals
   const [showAddAsset, setShowAddAsset] = useState(false)
@@ -52,6 +53,19 @@ export default function Home() {
       setApiHealth('error')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDeleteHolding = async (holdingId) => {
+    try {
+      setDeleting(true)
+      await removeHolding(holdingId)
+      // Rafraîchir les données
+      await loadData()
+    } catch (err) {
+      setError(`Erreur lors de la suppression: ${err.message}`)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -130,7 +144,10 @@ export default function Home() {
             
             <div className="mb-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-4">Mes Positions</h2>
-              <HoldingsList holdings={portfolio.holdings} />
+              <HoldingsList 
+                holdings={portfolio.holdings} 
+                onDelete={handleDeleteHolding}
+              />
             </div>
 
             <TopPerformers 
