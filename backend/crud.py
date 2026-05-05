@@ -45,14 +45,16 @@ class AssetCRUD:
 # ============ HOLDINGS ============
 class HoldingCRUD:
     @staticmethod
-    def create(db: Session, asset_id: int, quantity: float, avg_price: float, notes: str = None) -> Holding:
+    def create(db: Session, asset_id: int, quantity: float, avg_price: float,
+               notes: str = None, purchase_date=None) -> Holding:
         """Crée une nouvelle position"""
         holding = Holding(
             asset_id=asset_id,
             quantity=quantity,
             avg_purchase_price=avg_price,
             total_cost=quantity * avg_price,
-            notes=notes
+            notes=notes,
+            purchase_date=purchase_date
         )
         db.add(holding)
         db.commit()

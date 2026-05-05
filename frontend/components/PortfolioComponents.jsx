@@ -48,13 +48,19 @@ export const PortfolioSummary = ({ portfolio }) => {
   )
 }
 
-export const HoldingsList = ({ holdings }) => {
+export const HoldingsList = ({ holdings, onDelete }) => {
   if (!holdings || holdings.length === 0) {
     return (
       <div className="bg-white rounded-lg p-6 shadow text-center">
         <p className="text-gray-500">Aucune position dans le portefeuille</p>
       </div>
     )
+  }
+
+  const handleDelete = (holdingId, symbol) => {
+    if (window.confirm(`⚠️ Êtes-vous sûr de vouloir supprimer la position ${symbol}?\n\nCette action ne peut pas être annulée.`)) {
+      onDelete(holdingId)
+    }
   }
 
   return (
@@ -69,6 +75,7 @@ export const HoldingsList = ({ holdings }) => {
             <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Investi</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Valeur Actuelle</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Gain/Perte</th>
+            <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -90,6 +97,15 @@ export const HoldingsList = ({ holdings }) => {
                 <td className={`px-6 py-4 font-semibold ${getColorClass(gainLoss)}`}>
                   <div>{formatCurrency(gainLoss)}</div>
                   <div className="text-sm">{formatPercent(holding.gain_loss_percent)}</div>
+                </td>
+                <td className="px-6 py-4">
+                  <button
+                    onClick={() => handleDelete(holding.id, holding.symbol)}
+                    className="text-gray-400 hover:text-red-600 text-xl transition"
+                    title="Supprimer cette position"
+                  >
+                    🗑️
+                  </button>
                 </td>
               </tr>
             )

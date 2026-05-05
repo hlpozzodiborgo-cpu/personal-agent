@@ -4,18 +4,18 @@ Application FastAPI principale - API REST pour l'agent Investor AI
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 import logging
 
 from config import DATABASE_URL, DEBUG
-from models import Base, Asset as AssetModel
+from models import Base, Asset as AssetModel, Transaction as TransactionModel
 from schemas import (
-    AssetCreate, Asset, HoldingCreate, Holding, 
+    AssetCreate, Asset, HoldingCreate, Holding,
     PortfolioStats, PortfolioDetailResponse, TransactionCreate
 )
-from crud import AssetCRUD, HoldingCRUD, TransactionCRUD, PriceHistoryCRUD
+from crud import AssetCRUD, HoldingCRUD
 from finance_service import FinanceService
 
 # ============ CONFIGURATION ============
@@ -26,6 +26,15 @@ logger = logging.getLogger(__name__)
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(bind=engine)
+
+# Migration: ajout de la colonne purchase_date si absente
+from sqlalchemy import text
+with engine.connect() as _conn:
+    try:
+        _conn.execute(text("ALTER TABLE holdings ADD COLUMN purchase_date DATETIME"))
+        _conn.commit()
+    except Exception:
+        pass
 
 # FastAPI app
 app = FastAPI(
@@ -114,6 +123,43 @@ async def add_asset(symbol: str, name: str = None, asset_type: str = "stock", db
         )
 
 
+@app.get("/api/search", tags=["Assets"])
+async def search_assets(q: str):
+    """Recherche d'actifs par nom ou symbole via Yahoo Finance (actions, ETF, crypto…)"""
+    import requests as req
+    if len(q.strip()) < 2:
+        return {"results": []}
+    try:
+        r = req.get(
+            "https://query2.finance.yahoo.com/v1/finance/search",
+            params={"q": q, "quotesCount": 10, "newsCount": 0},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=5
+        )
+        if r.status_code != 200:
+            return {"results": []}
+        type_map = {
+            "EQUITY": "stock", "ETF": "etf", "MUTUALFUND": "etf",
+            "CRYPTOCURRENCY": "crypto", "CURRENCY": "forex"
+        }
+        results = [
+            {
+                "symbol": q["symbol"],
+                "display_symbol": q["symbol"],
+                "name": q.get("longname") or q.get("shortname") or q["symbol"],
+                "type": q.get("quoteType", ""),
+                "asset_type": type_map.get(q.get("quoteType", ""), "stock"),
+                "exchange": q.get("exchange", "")
+            }
+            for q in r.json().get("quotes", [])
+            if q.get("symbol") and q.get("quoteType") != "FUTURE"
+        ]
+        return {"results": results}
+    except Exception as e:
+        logger.error(f"Erreur recherche: {e}")
+        return {"results": []}
+
+
 @app.get("/api/assets/{symbol}/info", tags=["Assets"])
 async def get_asset_info(symbol: str):
     """Récupère les infos détaillées d'un actif"""
@@ -130,6 +176,18 @@ async def get_asset_info(symbol: str):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+@app.get("/api/assets/{symbol}/price-at", tags=["Assets"])
+async def get_price_at_date(symbol: str, date: str):
+    """Prix de cloture d'un actif a une date donnee (gere weekends et jours feries)"""
+    price = FinanceService.get_price_at_date(symbol, date)
+    if price is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Aucun prix disponible pour {symbol} a la date {date}. Entrez le prix manuellement."
+        )
+    return {"symbol": symbol, "date": date, "price": round(price, 4)}
 
 
 @app.get("/api/assets/{symbol}/history", tags=["Assets"])
@@ -156,41 +214,56 @@ async def get_asset_history(symbol: str, period: str = "1mo", interval: str = "1
 async def add_holding(
     asset_id: int,
     quantity: float,
-    avgPrice: float,
+    purchase_date: str,
+    price: float = None,
     notes: str = None,
     db: Session = Depends(get_db)
 ):
-    """
-    Ajoute une nouvelle position au portefeuille
-    
-    Enregistre:
-    1. La position (nombre de parts + prix moyen)
-    2. Une transaction d'achat
-    """
     try:
-        holding = HoldingCRUD.create(db, asset_id, quantity, avgPrice, notes)
-        
-        # Enregistre la transaction
-        TransactionCRUD.create(
-            db, holding.id, "buy", quantity, avgPrice,
-            notes="Position initiale" if not notes else notes
-        )
-        
         asset = db.query(AssetModel).filter(AssetModel.id == asset_id).first()
-        
+        if not asset:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Actif non trouve")
+
+        purchase_dt = datetime.strptime(purchase_date, "%Y-%m-%d")
+
+        # Prix: fourni par l'utilisateur ou recupere depuis l'historique
+        if price is None:
+            price = FinanceService.get_price_at_date(asset.symbol, purchase_date)
+            if price is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Prix introuvable pour {asset.symbol} a cette date. Entrez-le manuellement."
+                )
+
+        holding = HoldingCRUD.create(db, asset_id, quantity, price, notes, purchase_dt)
+
+        # Enregistre la transaction a la date d'achat (sans modifier la position)
+        transaction = TransactionModel(
+            holding_id=holding.id,
+            transaction_type="buy",
+            quantity=quantity,
+            price_per_unit=price,
+            total_amount=quantity * price,
+            notes=notes or "Position initiale",
+            date=purchase_dt
+        )
+        db.add(transaction)
+        db.commit()
+
         return {
             "success": True,
             "holding_id": holding.id,
             "asset": asset.symbol,
-            "quantity": holding.quantity,
-            "total_invested": holding.total_cost
+            "quantity": quantity,
+            "price": price,
+            "purchase_date": purchase_date,
+            "total_invested": quantity * price
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Erreur lors de l'ajout d'une position: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        logger.error(f"Erreur ajout position: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.get("/api/portfolio", tags=["Portfolio"], response_model=dict)
@@ -222,17 +295,18 @@ async def get_portfolio_overview(db: Session = Depends(get_db)):
                 "top_loser": None
             }
         
-        # Prépare les données
+        # Prépare les données avec prix en temps réel
         holdings_data = []
         for holding in holdings:
             asset = holding.asset
+            live_price = FinanceService.get_current_price(asset.symbol) or asset.current_price
             holdings_data.append({
                 "id": holding.id,
                 "symbol": asset.symbol,
                 "name": asset.name,
                 "quantity": holding.quantity,
                 "avg_purchase_price": holding.avg_purchase_price,
-                "current_price": asset.current_price,
+                "current_price": live_price,
                 "total_invested": holding.total_cost
             })
         
@@ -265,18 +339,18 @@ async def remove_holding(holding_id: int, db: Session = Depends(get_db)):
     """Supprime une position (la marque comme inactive)"""
     try:
         success = HoldingCRUD.delete(db, holding_id)
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Position non trouvée"
-            )
-        return {"success": True, "message": "Position supprimée"}
     except Exception as e:
         logger.error(f"Erreur lors de la suppression d'une position: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Position non trouvée"
+        )
+    return {"success": True, "message": "Position supprimée"}
 
 
 # ============ ROOT ============

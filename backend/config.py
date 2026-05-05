@@ -10,6 +10,7 @@ DEBUG = os.getenv("DEBUG", "False") == "True"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # API Keys
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 
