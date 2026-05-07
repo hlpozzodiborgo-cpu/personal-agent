@@ -70,7 +70,7 @@ export const HoldingsList = ({ holdings, onDelete }) => {
           <tr>
             <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Actif</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Quantité</th>
-            <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Prix Moyen</th>
+            <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Prix d'Achat</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Prix Actuel</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Investi</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Valeur Actuelle</th>
