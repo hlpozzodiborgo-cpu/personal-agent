@@ -385,14 +385,12 @@ export const PortfolioChart = () => {
   const twrLast   = portfolioRaw[portfolioRaw.length - 1]?.twr
   const twrPct    = twrLast !== undefined ? twrLast - 100 : null
 
-  // Mode solo : rendement simple adapté à la période
-  // - "all"   : (valeur_actuelle - capital_investi) / capital_investi  → gain réel sur le capital
-  // - autres  : (valeur_fin - valeur_début) / valeur_début            → variation de la période
+  // Mode solo :
+  // - "all"   : (valeur_actuelle - capital_investi) / capital_investi  → rendement réel sur le capital
+  // - autres  : TWR de la période → hors effet des dépôts (identique au mode comparaison)
   const soloPct = period === 'all' && totalInvested && rawLast
     ? ((rawLast - totalInvested) / totalInvested) * 100
-    : rawFirst && rawLast
-    ? ((rawLast / rawFirst) - 1) * 100
-    : null
+    : twrPct
 
   const isPos     = hasComp ? (twrPct === null || twrPct >= 0) : (soloPct === null || soloPct >= 0)
   const portColor = isPos ? '#10b981' : '#ef4444'
