@@ -224,6 +224,33 @@ const PERIODS = [
 ]
 const COMP_COLORS = ['#3b82f6', '#8b5cf6', '#f59e0b', '#06b6d4', '#ec4899', '#84cc16']
 
+// Tick X-axis sur deux lignes : date (ligne 1) + heure (ligne 2)
+const MultiLineTick = ({ x, y, payload, period }) => {
+  if (!payload?.value) return null
+  const d = new Date(payload.value)
+  const intraday = payload.value?.includes('T')
+  let line1 = '', line2 = ''
+
+  if (period === '1d') {
+    line1 = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  } else if (period === '1w') {
+    line1 = d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit' })
+    line2 = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  } else if (period === '1mo') {
+    line1 = d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
+    line2 = intraday ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : ''
+  } else {
+    line1 = d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
+  }
+
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text x={0} y={0} dy={14} textAnchor="middle" fill="#9ca3af" fontSize={11}>{line1}</text>
+      {line2 && <text x={0} y={0} dy={26} textAnchor="middle" fill="#9ca3af" fontSize={10}>{line2}</text>}
+    </g>
+  )
+}
+
 const normalize = (data) => {
   if (!data?.length) return []
   const first = data[0].value
@@ -370,15 +397,10 @@ export const PortfolioChart = () => {
   const isPos     = hasComp ? (twrPct === null || twrPct >= 0) : (soloPct === null || soloPct >= 0)
   const portColor = isPos ? '#10b981' : '#ef4444'
 
-  const formatTick = (s) => {
-    const d = new Date(s)
-    if (period === '1d')  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-    if (period === '1w')  return d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit' })
-                               + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-    if (period === '1mo') return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
-                               + (s?.includes('T') ? ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit' }) + 'h' : '')
-    return d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
-  }
+  // Intervalle de ticks adapté à la densité des données
+  const xAxisInterval = period === '1mo'
+    ? Math.max(1, Math.floor(chartData.length / 8))  // ~8 ticks pour 1 mois
+    : 'preserveStartEnd'
 
   const formatY = hasComp
     ? v => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
@@ -389,7 +411,10 @@ export const PortfolioChart = () => {
     const d = new Date(label)
     const dl = period === '1d'
       ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-      : d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: (period === 'all' || period === '1y') ? '2-digit' : undefined })
+      : (period === 'all' || period === '1y')
+        ? d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: '2-digit' })
+        : d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
+          + (label?.includes('T') ? ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '')
     return (
       <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-4 py-3 text-sm min-w-[160px]">
         <p className="text-gray-400 text-xs mb-2">{dl}</p>
@@ -483,8 +508,8 @@ export const PortfolioChart = () => {
       ) : chartData.length < 2 ? (
         <div className="flex items-center justify-center h-64 text-gray-400 text-sm">Pas assez de données pour cette période.</div>
       ) : (
-        <ResponsiveContainer width="100%" height={300}>
-          <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+        <ResponsiveContainer width="100%" height={320}>
+          <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 8 }}>
             <defs>
               <linearGradient id="gPort" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%"  stopColor={portColor} stopOpacity={hasComp ? 0.04 : 0.18} />
@@ -492,9 +517,12 @@ export const PortfolioChart = () => {
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
-            <XAxis dataKey="date" tickFormatter={formatTick} tick={{ fontSize: 11, fill: '#9ca3af' }}
-              tickLine={false} axisLine={false} interval="preserveStartEnd"
-              minTickGap={period === '1w' || period === '1mo' ? 90 : 60} />
+            <XAxis dataKey="date"
+              tick={<MultiLineTick period={period} />}
+              tickLine={false} axisLine={false}
+              interval={xAxisInterval}
+              minTickGap={60}
+              height={period === '1w' || period === '1mo' ? 42 : 24} />
             <YAxis tickFormatter={formatY} tick={{ fontSize: 11, fill: '#9ca3af' }}
               tickLine={false} axisLine={false} width={56} domain={['auto', 'auto']} />
             <Tooltip content={<TooltipContent />} />
