@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import { getPortfolio, getAssets, checkHealth, removeHolding } from '@/lib/api'
-import { PortfolioSummary, HoldingsList, ConsolidatedView, TopPerformers } from '@/components/PortfolioComponents'
+import { PortfolioSummary, HoldingsList, ConsolidatedView, PortfolioChart, TopPerformers } from '@/components/PortfolioComponents'
 import { AddAssetModal, AddHoldingModal, EditHoldingModal, SettingsModal } from '@/components/Modals'
 
 export default function Home() {
@@ -12,7 +12,7 @@ export default function Home() {
   const [error, setError] = useState('')
   const [apiHealth, setApiHealth] = useState(null)
   const [deleting, setDeleting] = useState(false)
-  const [activeTab, setActiveTab] = useState('consolidated')
+  const [activeTab, setActiveTab] = useState('evolution')
 
   const [showAddAsset, setShowAddAsset] = useState(false)
   const [showAddHolding, setShowAddHolding] = useState(false)
@@ -62,6 +62,7 @@ export default function Home() {
   }
 
   const tabs = [
+    { id: 'evolution',    label: 'Évolution' },
     { id: 'consolidated', label: 'Par titre' },
     { id: 'positions',    label: 'Ordres passés' },
   ]
@@ -155,9 +156,8 @@ export default function Home() {
 
             {/* Contenu de l'onglet */}
             <div className="mb-8">
-              {activeTab === 'consolidated' && (
-                <ConsolidatedView holdings={portfolio.holdings} />
-              )}
+              {activeTab === 'evolution' && <PortfolioChart />}
+              {activeTab === 'consolidated' && <ConsolidatedView holdings={portfolio.holdings} />}
               {activeTab === 'positions' && (
                 <HoldingsList holdings={portfolio.holdings} onDelete={handleDeleteHolding} onEdit={setEditingHolding} />
               )}
