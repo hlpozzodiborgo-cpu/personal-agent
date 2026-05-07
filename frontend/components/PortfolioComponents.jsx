@@ -299,8 +299,14 @@ export const PortfolioChart = () => {
     if (!portfolioRaw.length) return []
     if (!hasComp) return portfolioRaw
 
-    const portNorm = normalize(portfolioRaw)
-    const portMap  = new Map(portNorm.map(d => [d.date, d.pct]))
+    // Mode comparaison : portefeuille en TWR (élimine l'effet des dépôts),
+    // actifs de comparaison en % simple (pas de flux de trésorerie).
+    // Les deux démarrent à 0 % — comparaison équitable.
+    const portNorm = portfolioRaw.map(d => ({
+      date: d.date,
+      pct: d.twr !== undefined ? d.twr - 100 : ((d.value / portfolioRaw[0].value) - 1) * 100
+    }))
+
     const compMaps = comparisons
       .filter(c => c.visible && c.data.length > 0)
       .map(c => ({ symbol: c.symbol, map: new Map(normalize(c.data).map(d => [d.date, d.pct])) }))
@@ -312,13 +318,16 @@ export const PortfolioChart = () => {
     }))
   }, [portfolioRaw, comparisons, hasComp])
 
-  // Métriques
-  const rawFirst = portfolioRaw[0]?.value
-  const rawLast  = portfolioRaw[portfolioRaw.length - 1]?.value
-  const change    = rawFirst && rawLast ? rawLast - rawFirst : null
-  const changePct = rawFirst && change  ? (change / rawFirst) * 100 : null
-  const isPos     = change === null || change >= 0
-  const portColor = isPos ? '#10b981' : '#ef4444'
+  // Métriques — mode solo : valeur absolue / mode comparaison : TWR
+  const rawFirst   = portfolioRaw[0]?.value
+  const rawLast    = portfolioRaw[portfolioRaw.length - 1]?.value
+  const change     = rawFirst && rawLast ? rawLast - rawFirst : null
+  const changePct  = rawFirst && change  ? (change / rawFirst) * 100 : null
+  const twrFirst   = portfolioRaw[0]?.twr      // 100 au départ
+  const twrLast    = portfolioRaw[portfolioRaw.length - 1]?.twr
+  const twrPct     = twrLast !== undefined ? twrLast - 100 : changePct
+  const isPos      = hasComp ? (twrPct === null || twrPct >= 0) : (change === null || change >= 0)
+  const portColor  = isPos ? '#10b981' : '#ef4444'
 
   const formatTick = (s) => {
     const d = new Date(s)
@@ -380,11 +389,12 @@ export const PortfolioChart = () => {
               <div className="flex items-center gap-1.5 text-sm">
                 <span className="w-3 h-3 rounded-full" style={{ backgroundColor: portColor }} />
                 <span className="text-gray-600 font-medium">Portefeuille</span>
-                {changePct !== null && (
+                {twrPct !== null && (
                   <span className={`font-semibold ${isPos ? 'text-green-600' : 'text-red-600'}`}>
-                    {isPos ? '+' : ''}{changePct.toFixed(2)}%
+                    {isPos ? '+' : ''}{twrPct.toFixed(2)}%
                   </span>
                 )}
+                <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded font-normal" title="Time-Weighted Return — élimine l'effet des dépôts">TWR</span>
               </div>
               {comparisons.filter(c => c.visible && c.data.length > 0).map(c => {
                 const n = normalize(c.data)
@@ -455,7 +465,7 @@ export const PortfolioChart = () => {
               <Area key={c.symbol} type="monotone" dataKey={c.symbol}
                 stroke={c.color} strokeWidth={2} fill="none"
                 dot={false} activeDot={{ r: 4, fill: c.color, strokeWidth: 0 }}
-                connectNulls={false} />
+                connectNulls={true} />
             ))}
           </AreaChart>
         </ResponsiveContainer>

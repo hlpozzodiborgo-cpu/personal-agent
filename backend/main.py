@@ -373,21 +373,44 @@ async def get_portfolio_history(period: str = "1mo", db: Session = Depends(get_d
     if not symbol_prices:
         return {"data": [], "order_dates": []}
 
-    # Reconstruction jour par jour
+    # Reconstruction jour par jour avec TWR (Time-Weighted Return)
+    # Le TWR elimine l'effet des depot/retraits pour comparer equitablement
+    # avec d'autres actifs. Standard industrie (CFA Institute).
     all_timestamps = sorted(set(ts for prices in symbol_prices.values() for ts in prices))
     data = []
+    twr_factor = 1.0
+    prev_total = None  # Valeur totale au timestamp precedent (avec tous les ordres actifs)
+
     for ts in all_timestamps:
         dt = datetime.fromtimestamp(ts)
         date_str = dt.isoformat() if is_intraday else dt.strftime("%Y-%m-%d")
-        total = 0.0
+        current_d = dt.date()
+
+        current_total = 0.0  # Tous les ordres actifs aujourd'hui (y compris nouveaux)
+        old_total = 0.0      # Ordres actifs AVANT aujourd'hui (exclut depots du jour)
+
         for holding in holdings:
-            if holding.purchase_date and holding.purchase_date.date() > dt.date():
+            if not holding.purchase_date:
                 continue
             price = symbol_prices.get(holding.asset.symbol, {}).get(ts)
-            if price:
-                total += holding.quantity * price
-        if total > 0:
-            data.append({"date": date_str, "value": round(total, 2)})
+            if not price:
+                continue
+            purchase_d = holding.purchase_date.date()
+            if purchase_d <= current_d:
+                current_total += holding.quantity * price
+            if purchase_d < current_d:
+                old_total += holding.quantity * price
+
+        if current_total <= 0:
+            continue
+
+        if prev_total is None or prev_total <= 0:
+            twr_factor = 1.0          # Initialisation
+        elif old_total > 0:
+            twr_factor *= (old_total / prev_total)  # Rendement du jour hors depot
+
+        prev_total = current_total
+        data.append({"date": date_str, "value": round(current_total, 2), "twr": round(twr_factor * 100, 2)})
 
     # Dates d'ordres dans la periode (pas pour intraday)
     order_dates = [] if is_intraday else sorted(set(
