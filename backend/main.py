@@ -275,6 +275,48 @@ async def add_holding(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@app.get("/api/assets/{symbol}/price-history", tags=["Assets"])
+async def get_asset_price_history(symbol: str, period: str = "1mo"):
+    """Prix historiques bruts d'un symbole (pour comparaison de courbes)"""
+    import requests as req
+    from datetime import datetime, timedelta
+    period_cfg = {
+        "1d":  (timedelta(days=1),    "5m"),
+        "1w":  (timedelta(weeks=1),   "1h"),
+        "1mo": (timedelta(days=30),   "1d"),
+        "1y":  (timedelta(days=365),  "1d"),
+        "all": (timedelta(days=1825), "1d"),
+    }
+    delta, interval = period_cfg.get(period, (timedelta(days=30), "1d"))
+    now = datetime.now()
+    start_ts = int((now - delta).timestamp())
+    is_intraday = interval in ("5m", "1h")
+    try:
+        r = req.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+            params={"period1": start_ts, "period2": int(now.timestamp()), "interval": interval},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10
+        )
+        if r.status_code != 200:
+            raise HTTPException(status_code=404, detail=f"{symbol} non trouve")
+        result = r.json().get("chart", {}).get("result")
+        if not result:
+            raise HTTPException(status_code=404, detail=f"Pas de donnees pour {symbol}")
+        timestamps = result[0].get("timestamp", [])
+        closes = result[0]["indicators"]["quote"][0].get("close", [])
+        data = [
+            {"date": datetime.fromtimestamp(ts).isoformat() if is_intraday else datetime.fromtimestamp(ts).strftime("%Y-%m-%d"),
+             "value": price}
+            for ts, price in zip(timestamps, closes) if price is not None
+        ]
+        return {"symbol": symbol, "data": data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/portfolio/history", tags=["Portfolio"])
 async def get_portfolio_history(period: str = "1mo", db: Session = Depends(get_db)):
     """Valeur historique du portefeuille reconstituee jour par jour"""

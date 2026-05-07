@@ -50,6 +50,9 @@ export const removeHolding = (holdingId) =>
 export const getPortfolioHistory = (period = '1mo') =>
   api.get('/api/portfolio/history', { params: { period } })
 
+export const getAssetPriceHistory = (symbol, period = '1mo') =>
+  api.get(`/api/assets/${symbol}/price-history`, { params: { period } })
+
 // ============ SETTINGS ============
 export const getSettings = () => api.get('/api/settings')
 export const updateFinnhubKey = (key) => api.put('/api/settings/finnhub-key', null, { params: { key } })

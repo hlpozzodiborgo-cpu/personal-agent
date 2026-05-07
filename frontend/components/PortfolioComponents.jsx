@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { formatCurrency, formatPercent, getColorClass, getBackgroundColorClass } from '@/lib/utils'
-import { getPortfolioHistory } from '@/lib/api'
+import { getPortfolioHistory, getAssetPriceHistory, searchAssets } from '@/lib/api'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ReferenceLine, ResponsiveContainer
@@ -222,91 +222,192 @@ const PERIODS = [
   { key: '1y',  label: '1A' },
   { key: 'all', label: 'Tout' },
 ]
+const COMP_COLORS = ['#3b82f6', '#8b5cf6', '#f59e0b', '#06b6d4', '#ec4899', '#84cc16']
 
-const CustomTooltip = ({ active, payload, label, period }) => {
-  if (!active || !payload?.length) return null
-  const value = payload[0].value
-  const date = new Date(label)
-  const dateLabel = period === '1d'
-    ? date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-    : date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: period === '1y' || period === 'all' ? '2-digit' : undefined })
-  return (
-    <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-4 py-3 text-sm">
-      <p className="text-gray-500 mb-1">{dateLabel}</p>
-      <p className="font-bold text-gray-900">{formatCurrency(value)}</p>
-    </div>
-  )
+const normalize = (data) => {
+  if (!data?.length) return []
+  const first = data[0].value
+  if (!first) return []
+  return data.map(d => ({ date: d.date, pct: ((d.value / first) - 1) * 100 }))
 }
 
 export const PortfolioChart = () => {
-  const [period, setPeriod] = useState('1mo')
-  const [chartData, setChartData] = useState([])
-  const [orderDates, setOrderDates] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [period, setPeriod]           = useState('1mo')
+  const [portfolioRaw, setPortfolioRaw] = useState([])
+  const [orderDates, setOrderDates]   = useState([])
+  const [loading, setLoading]         = useState(true)
+  const [comparisons, setComparisons] = useState([])  // {symbol,name,color,visible,data,loading}
+  const [query, setQuery]             = useState('')
+  const [results, setResults]         = useState([])
+  const [searching, setSearching]     = useState(false)
+  const [showDrop, setShowDrop]       = useState(false)
 
+  const hasComp = comparisons.length > 0
+
+  // Chargement portefeuille
   useEffect(() => {
     setLoading(true)
-    setError('')
     getPortfolioHistory(period)
-      .then(res => {
-        setChartData(res.data.data || [])
-        setOrderDates(res.data.order_dates || [])
-      })
-      .catch(() => setError('Impossible de charger les données historiques.'))
+      .then(r => { setPortfolioRaw(r.data.data || []); setOrderDates(r.data.order_dates || []) })
       .finally(() => setLoading(false))
   }, [period])
 
-  const first = chartData[0]?.value ?? null
-  const last  = chartData[chartData.length - 1]?.value ?? null
-  const change = (first && last) ? last - first : null
-  const changePct = (first && change) ? (change / first) * 100 : null
-  const isPositive = change === null || change >= 0
-  const color = isPositive ? '#10b981' : '#ef4444'
-  const gradientId = isPositive ? 'gradGreen' : 'gradRed'
+  // Re-chargement comparaisons quand la période change
+  useEffect(() => {
+    if (!comparisons.length) return
+    setComparisons(prev => prev.map(c => ({ ...c, data: [], loading: true })))
+    comparisons.forEach(c => fetchComp(c.symbol))
+  }, [period])
 
-  const formatTick = (str) => {
-    const d = new Date(str)
+  // Recherche avec debounce
+  useEffect(() => {
+    if (query.length < 2) { setResults([]); setShowDrop(false); return }
+    const t = setTimeout(() => {
+      setSearching(true)
+      searchAssets(query)
+        .then(r => { setResults(r.data.results || []); setShowDrop(true) })
+        .catch(() => {})
+        .finally(() => setSearching(false))
+    }, 400)
+    return () => clearTimeout(t)
+  }, [query])
+
+  const fetchComp = (symbol) => {
+    getAssetPriceHistory(symbol, period)
+      .then(r => setComparisons(prev => prev.map(c =>
+        c.symbol === symbol ? { ...c, data: r.data.data || [], loading: false } : c
+      )))
+      .catch(() => setComparisons(prev => prev.map(c =>
+        c.symbol === symbol ? { ...c, loading: false } : c
+      )))
+  }
+
+  const addComp = (asset) => {
+    if (comparisons.some(c => c.symbol === asset.symbol) || comparisons.length >= 5) return
+    const color = COMP_COLORS[comparisons.length % COMP_COLORS.length]
+    setComparisons(prev => [...prev, { symbol: asset.symbol, name: asset.name, color, visible: true, data: [], loading: true }])
+    setQuery(''); setShowDrop(false)
+    fetchComp(asset.symbol)
+  }
+
+  // Construction des données du graphique
+  const chartData = useMemo(() => {
+    if (!portfolioRaw.length) return []
+    if (!hasComp) return portfolioRaw
+
+    const portNorm = normalize(portfolioRaw)
+    const portMap  = new Map(portNorm.map(d => [d.date, d.pct]))
+    const compMaps = comparisons
+      .filter(c => c.visible && c.data.length > 0)
+      .map(c => ({ symbol: c.symbol, map: new Map(normalize(c.data).map(d => [d.date, d.pct])) }))
+
+    return portNorm.map(d => ({
+      date: d.date,
+      portfolio: d.pct,
+      ...Object.fromEntries(compMaps.map(cm => [cm.symbol, cm.map.get(d.date) ?? null]))
+    }))
+  }, [portfolioRaw, comparisons, hasComp])
+
+  // Métriques
+  const rawFirst = portfolioRaw[0]?.value
+  const rawLast  = portfolioRaw[portfolioRaw.length - 1]?.value
+  const change    = rawFirst && rawLast ? rawLast - rawFirst : null
+  const changePct = rawFirst && change  ? (change / rawFirst) * 100 : null
+  const isPos     = change === null || change >= 0
+  const portColor = isPos ? '#10b981' : '#ef4444'
+
+  const formatTick = (s) => {
+    const d = new Date(s)
     if (period === '1d')  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
     if (period === '1w')  return d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit' })
     if (period === '1mo') return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
     return d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
   }
 
-  const formatY = (v) => {
-    if (v >= 10000) return `${(v / 1000).toFixed(0)}k€`
-    if (v >= 1000)  return `${(v / 1000).toFixed(1)}k€`
-    return `${v.toFixed(0)}€`
+  const formatY = hasComp
+    ? v => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
+    : v => v >= 10000 ? `${(v/1000).toFixed(0)}k€` : v >= 1000 ? `${(v/1000).toFixed(1)}k€` : `${v.toFixed(0)}€`
+
+  const TooltipContent = ({ active, payload, label }) => {
+    if (!active || !payload?.length) return null
+    const d = new Date(label)
+    const dl = period === '1d'
+      ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: (period === 'all' || period === '1y') ? '2-digit' : undefined })
+    return (
+      <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-4 py-3 text-sm min-w-[160px]">
+        <p className="text-gray-400 text-xs mb-2">{dl}</p>
+        {payload.filter(p => p.value !== null).map((p, i) => {
+          const isPort = p.dataKey === 'portfolio' || p.dataKey === 'value'
+          const lbl = isPort ? 'Portefeuille' : p.dataKey
+          const val = hasComp ? `${p.value >= 0 ? '+' : ''}${p.value?.toFixed(2)}%` : formatCurrency(p.value)
+          return (
+            <div key={i} className="flex items-center justify-between gap-4 mb-1">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: p.stroke }} />
+                <span className="text-gray-600">{lbl}</span>
+              </div>
+              <span className="font-semibold text-gray-900">{val}</span>
+            </div>
+          )
+        })}
+      </div>
+    )
   }
 
   return (
     <div className="bg-white rounded-lg shadow p-6">
-      {/* En-tête : valeur + performance + sélecteur */}
+      {/* En-tête */}
       <div className="flex items-start justify-between mb-6">
         <div>
-          {last !== null && (
+          {!hasComp && rawLast && (
             <>
-              <p className="text-3xl font-bold text-gray-900">{formatCurrency(last)}</p>
+              <p className="text-3xl font-bold text-gray-900">{formatCurrency(rawLast)}</p>
               {change !== null && (
-                <p className={`text-sm font-medium mt-1 ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
-                  {isPositive ? '+' : ''}{formatCurrency(change)} ({isPositive ? '+' : ''}{changePct.toFixed(2)}%)
+                <p className={`text-sm font-medium mt-1 ${isPos ? 'text-green-600' : 'text-red-600'}`}>
+                  {isPos ? '+' : ''}{formatCurrency(change)} ({isPos ? '+' : ''}{changePct.toFixed(2)}%)
                   <span className="text-gray-400 font-normal ml-1">sur la période</span>
                 </p>
               )}
             </>
           )}
+          {hasComp && (
+            <div className="flex flex-wrap gap-3 items-center">
+              <div className="flex items-center gap-1.5 text-sm">
+                <span className="w-3 h-3 rounded-full" style={{ backgroundColor: portColor }} />
+                <span className="text-gray-600 font-medium">Portefeuille</span>
+                {changePct !== null && (
+                  <span className={`font-semibold ${isPos ? 'text-green-600' : 'text-red-600'}`}>
+                    {isPos ? '+' : ''}{changePct.toFixed(2)}%
+                  </span>
+                )}
+              </div>
+              {comparisons.filter(c => c.visible && c.data.length > 0).map(c => {
+                const n = normalize(c.data)
+                const last = n[n.length - 1]?.pct
+                return (
+                  <div key={c.symbol} className="flex items-center gap-1.5 text-sm">
+                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: c.color }} />
+                    <span className="text-gray-600 font-medium">{c.symbol}</span>
+                    {last !== undefined && (
+                      <span className={`font-semibold ${last >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {last >= 0 ? '+' : ''}{last.toFixed(2)}%
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+
+        {/* Sélecteur période */}
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg flex-shrink-0">
           {PERIODS.map(p => (
-            <button
-              key={p.key}
-              onClick={() => setPeriod(p.key)}
+            <button key={p.key} onClick={() => setPeriod(p.key)}
               className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                period === p.key
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
+                period === p.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}>
               {p.label}
             </button>
           ))}
@@ -318,72 +419,115 @@ export const PortfolioChart = () => {
         <div className="flex items-center justify-center h-64">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
         </div>
-      ) : error ? (
-        <div className="flex items-center justify-center h-64 text-red-500 text-sm">{error}</div>
       ) : chartData.length < 2 ? (
-        <div className="flex items-center justify-center h-64 text-gray-400 text-sm">
-          Pas assez de données pour cette période.
-        </div>
+        <div className="flex items-center justify-center h-64 text-gray-400 text-sm">Pas assez de données pour cette période.</div>
       ) : (
         <ResponsiveContainer width="100%" height={300}>
           <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
             <defs>
-              <linearGradient id="gradGreen" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor="#10b981" stopOpacity={0.18} />
-                <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient id="gradRed" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.18} />
-                <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+              <linearGradient id="gPort" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor={portColor} stopOpacity={hasComp ? 0.04 : 0.18} />
+                <stop offset="95%" stopColor={portColor} stopOpacity={0} />
               </linearGradient>
             </defs>
-
             <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+            <XAxis dataKey="date" tickFormatter={formatTick} tick={{ fontSize: 11, fill: '#9ca3af' }}
+              tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={60} />
+            <YAxis tickFormatter={formatY} tick={{ fontSize: 11, fill: '#9ca3af' }}
+              tickLine={false} axisLine={false} width={56} domain={['auto', 'auto']} />
+            <Tooltip content={<TooltipContent />} />
 
-            <XAxis
-              dataKey="date"
-              tickFormatter={formatTick}
-              tick={{ fontSize: 11, fill: '#9ca3af' }}
-              tickLine={false}
-              axisLine={false}
-              interval="preserveStartEnd"
-              minTickGap={60}
-            />
-            <YAxis
-              tickFormatter={formatY}
-              tick={{ fontSize: 11, fill: '#9ca3af' }}
-              tickLine={false}
-              axisLine={false}
-              width={52}
-              domain={['auto', 'auto']}
-            />
-
-            <Tooltip content={<CustomTooltip period={period} />} />
-
-            {/* Traits rouges aux dates de passage d'ordre */}
-            {orderDates.map(d => (
-              <ReferenceLine
-                key={d}
-                x={d}
-                stroke="#ef4444"
-                strokeWidth={1}
-                strokeDasharray="4 3"
-                strokeOpacity={0.7}
-              />
+            {!hasComp && orderDates.map(d => (
+              <ReferenceLine key={d} x={d} stroke="#ef4444" strokeWidth={1} strokeDasharray="4 3" strokeOpacity={0.7} />
             ))}
 
-            <Area
-              type="monotone"
-              dataKey="value"
-              stroke={color}
-              strokeWidth={2}
-              fill={`url(#${gradientId})`}
-              dot={false}
-              activeDot={{ r: 4, fill: color, strokeWidth: 0 }}
-            />
+            {/* Portefeuille */}
+            <Area type="monotone" dataKey={hasComp ? 'portfolio' : 'value'}
+              stroke={portColor} strokeWidth={2} fill="url(#gPort)"
+              dot={false} activeDot={{ r: 4, fill: portColor, strokeWidth: 0 }} />
+
+            {/* Courbes de comparaison */}
+            {comparisons.filter(c => c.visible && c.data.length > 0).map(c => (
+              <Area key={c.symbol} type="monotone" dataKey={c.symbol}
+                stroke={c.color} strokeWidth={2} fill="none"
+                dot={false} activeDot={{ r: 4, fill: c.color, strokeWidth: 0 }}
+                connectNulls={false} />
+            ))}
           </AreaChart>
         </ResponsiveContainer>
       )}
+
+      {/* Panneau comparaison */}
+      <div className="mt-6 pt-5 border-t border-gray-100">
+        <p className="text-sm font-medium text-gray-700 mb-3">Comparer avec</p>
+
+        {/* Barre de recherche */}
+        <div className="relative">
+          <input type="text" value={query}
+            onChange={e => setQuery(e.target.value)}
+            onBlur={() => setTimeout(() => setShowDrop(false), 150)}
+            onFocus={() => results.length > 0 && setShowDrop(true)}
+            placeholder="Rechercher un actif (AAPL, S&P 500, Bitcoin…)"
+            className="w-full px-4 py-2 pr-10 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+          <div className="absolute right-3 top-2.5 text-gray-400">
+            {searching
+              ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500" />
+              : <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                </svg>
+            }
+          </div>
+          {showDrop && results.length > 0 && (
+            <div className="absolute w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1 z-10 max-h-48 overflow-y-auto">
+              {results.map((a, i) => (
+                <button key={i} onMouseDown={() => addComp(a)}
+                  disabled={comparisons.some(c => c.symbol === a.symbol) || comparisons.length >= 5}
+                  className="w-full px-4 py-2.5 text-left hover:bg-blue-50 border-b last:border-0 flex justify-between items-center disabled:opacity-40 disabled:cursor-not-allowed">
+                  <div>
+                    <p className="font-medium text-sm text-gray-900">{a.display_symbol}</p>
+                    <p className="text-xs text-gray-500 truncate">{a.name}</p>
+                  </div>
+                  <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded ml-2 flex-shrink-0">{a.type}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Liste des comparaisons */}
+        {comparisons.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {comparisons.map(c => (
+              <div key={c.symbol}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm transition-all ${
+                  c.visible ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-50'
+                }`}>
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: c.color }} />
+                <span className="font-medium text-gray-800">{c.symbol}</span>
+                {c.loading && <div className="animate-spin rounded-full h-3 w-3 border-b border-gray-400" />}
+                {/* Œil : masquer/afficher */}
+                <button onClick={() => setComparisons(prev => prev.map(x => x.symbol === c.symbol ? { ...x, visible: !x.visible } : x))}
+                  className="text-gray-400 hover:text-gray-700 transition">
+                  {c.visible
+                    ? <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/></svg>
+                    : <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" clipRule="evenodd"/><path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.064 7 9.542 7 .847 0 1.669-.105 2.454-.303z"/></svg>
+                  }
+                </button>
+                {/* Supprimer */}
+                <button onClick={() => setComparisons(prev => prev.filter(x => x.symbol !== c.symbol))}
+                  className="text-gray-300 hover:text-red-500 transition ml-0.5">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {comparisons.length >= 5 && (
+          <p className="text-xs text-gray-400 mt-2">Maximum 5 comparaisons atteintes.</p>
+        )}
+      </div>
     </div>
   )
 }
