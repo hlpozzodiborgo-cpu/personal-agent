@@ -1,23 +1,25 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { getPortfolio, getAssets, checkHealth, removeHolding } from '@/lib/api'
 import { PortfolioSummary, HoldingsList, ConsolidatedView, PortfolioChart, TopPerformers } from '@/components/PortfolioComponents'
 import { AddAssetModal, AddHoldingModal, EditHoldingModal, SettingsModal } from '@/components/Modals'
 
 export default function Home() {
   const [portfolio, setPortfolio] = useState(null)
-  const [assets, setAssets] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [assets, setAssets]       = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState('')
   const [apiHealth, setApiHealth] = useState(null)
-  const [deleting, setDeleting] = useState(false)
   const [activeTab, setActiveTab] = useState('evolution')
 
-  const [showAddAsset, setShowAddAsset] = useState(false)
-  const [showAddHolding, setShowAddHolding] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
-  const [editingHolding, setEditingHolding] = useState(null)
+  const [showAddAsset,    setShowAddAsset]    = useState(false)
+  const [showAddHolding,  setShowAddHolding]  = useState(false)
+  const [showSettings,    setShowSettings]    = useState(false)
+  const [editingHolding,  setEditingHolding]  = useState(null)
+
+  // Vrai uniquement lors du tout premier chargement — évite le clignotement sur les refresh suivants
+  const isFirstLoad = useRef(true)
 
   useEffect(() => {
     loadData()
@@ -27,12 +29,12 @@ export default function Home() {
 
   const loadData = async () => {
     try {
-      setLoading(true)
+      if (isFirstLoad.current) setLoading(true)
       setError('')
       try {
         await checkHealth()
         setApiHealth('ok')
-      } catch (err) {
+      } catch {
         setApiHealth('error')
         setError('❌ Impossible de se connecter à l\'API. Vérifiez que le backend est en cours d\'exécution.')
         return
@@ -40,9 +42,9 @@ export default function Home() {
       const [portfolioRes, assetsRes] = await Promise.all([getPortfolio(), getAssets()])
       setPortfolio(portfolioRes.data)
       setAssets(assetsRes.data)
+      isFirstLoad.current = false
     } catch (err) {
-      console.error('Erreur:', err)
-      setError(`Erreur lors du chargement des données: ${err.message}`)
+      setError(`Erreur lors du chargement: ${err.message}`)
       setApiHealth('error')
     } finally {
       setLoading(false)
@@ -51,13 +53,10 @@ export default function Home() {
 
   const handleDeleteHolding = async (holdingId) => {
     try {
-      setDeleting(true)
       await removeHolding(holdingId)
       await loadData()
     } catch (err) {
       setError(`Erreur lors de la suppression: ${err.message}`)
-    } finally {
-      setDeleting(false)
     }
   }
 
@@ -80,21 +79,19 @@ export default function Home() {
             <div className="flex items-center gap-3">
               {apiHealth === 'ok' && (
                 <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
                   API Connectée
                 </div>
               )}
               {apiHealth === 'error' && (
                 <div className="flex items-center gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-                  <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+                  <span className="w-2 h-2 bg-red-500 rounded-full" />
                   Déconnectée
                 </div>
               )}
-              <button
-                onClick={() => setShowSettings(true)}
+              <button onClick={() => setShowSettings(true)}
                 className="p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition"
-                title="Paramètres"
-              >
+                title="Paramètres">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -108,12 +105,12 @@ export default function Home() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
 
-        {/* Action Buttons */}
         <div className="mb-8 flex gap-3">
           <button onClick={() => setShowAddAsset(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2">
             ➕ Ajouter des Actifs
           </button>
-          <button onClick={() => setShowAddHolding(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center gap-2" disabled={assets.length === 0}>
+          <button onClick={() => setShowAddHolding(true)} disabled={assets.length === 0}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 disabled:opacity-50">
             📊 Ajouter une Position
           </button>
           <button onClick={loadData} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2">
@@ -123,44 +120,41 @@ export default function Home() {
 
         {error && <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">{error}</div>}
 
-        {loading && (
+        {/* Spinner uniquement au premier chargement */}
+        {loading && !portfolio && (
           <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto" />
             <p className="text-gray-600 mt-4">Chargement des données...</p>
           </div>
         )}
 
-        {!loading && portfolio && (
+        {portfolio && (
           <>
-            {/* Résumé global */}
             <PortfolioSummary portfolio={portfolio} />
 
             {/* Onglets */}
-            <div className="bg-white rounded-t-lg shadow-sm border-b border-gray-200 mb-0">
+            <div className="bg-white rounded-t-lg shadow-sm border-b border-gray-200">
               <nav className="flex">
                 {tabs.map(tab => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
+                  <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                     className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${
                       activeTab === tab.id
                         ? 'border-blue-600 text-blue-600'
                         : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                    }`}
-                  >
+                    }`}>
                     {tab.label}
                   </button>
                 ))}
               </nav>
             </div>
 
-            {/* Contenu de l'onglet */}
+            {/* Contenu — toujours monté, caché via CSS pour préserver le state */}
             <div className="mb-8">
-              {activeTab === 'evolution' && <PortfolioChart />}
-              {activeTab === 'consolidated' && <ConsolidatedView holdings={portfolio.holdings} />}
-              {activeTab === 'positions' && (
+              <div className={activeTab !== 'evolution'    ? 'hidden' : ''}><PortfolioChart /></div>
+              <div className={activeTab !== 'consolidated' ? 'hidden' : ''}><ConsolidatedView holdings={portfolio.holdings} /></div>
+              <div className={activeTab !== 'positions'    ? 'hidden' : ''}>
                 <HoldingsList holdings={portfolio.holdings} onDelete={handleDeleteHolding} onEdit={setEditingHolding} />
-              )}
+              </div>
             </div>
 
             <TopPerformers topGainer={portfolio.top_gainer} topLoser={portfolio.top_loser} />
@@ -169,7 +163,7 @@ export default function Home() {
 
         {!loading && !portfolio && (
           <div className="bg-white rounded-lg p-12 shadow text-center">
-            <p className="text-gray-500 text-lg">Aucun portefeuille encore. Commencez par ajouter des actifs et des positions!</p>
+            <p className="text-gray-500 text-lg">Aucun portefeuille encore. Commencez par ajouter des actifs et des positions !</p>
           </div>
         )}
       </main>
@@ -181,7 +175,7 @@ export default function Home() {
 
       <footer className="bg-white border-t border-gray-200 mt-12 py-6">
         <div className="max-w-7xl mx-auto px-4 text-center text-gray-600 text-sm">
-          <p>💡 Phase 1 en place: Dashboard de suivi. Phase 2: Actualités & Recommandations IA à venir</p>
+          <p>💡 Phase 1 en place : Dashboard de suivi. Phase 2 : Actualités & Recommandations IA à venir</p>
         </div>
       </footer>
     </div>

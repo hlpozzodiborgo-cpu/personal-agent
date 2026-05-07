@@ -243,20 +243,24 @@ export const PortfolioChart = () => {
   const [showDrop, setShowDrop]       = useState(false)
 
   const hasComp = comparisons.length > 0
+  // Ref pour éviter le problème de closure dans les useEffect
+  const comparisonsRef = useRef(comparisons)
+  useEffect(() => { comparisonsRef.current = comparisons }, [comparisons])
 
-  // Chargement portefeuille
+  // Chargement portefeuille — spinner uniquement au premier chargement
   useEffect(() => {
-    setLoading(true)
+    if (portfolioRaw.length === 0) setLoading(true)
     getPortfolioHistory(period)
       .then(r => { setPortfolioRaw(r.data.data || []); setOrderDates(r.data.order_dates || []) })
       .finally(() => setLoading(false))
   }, [period])
 
   // Re-chargement comparaisons quand la période change
+  // On garde les anciennes données visibles (pas de data: []) pendant le fetch
   useEffect(() => {
-    if (!comparisons.length) return
-    setComparisons(prev => prev.map(c => ({ ...c, data: [], loading: true })))
-    comparisons.forEach(c => fetchComp(c.symbol))
+    if (!comparisonsRef.current.length) return
+    setComparisons(prev => prev.map(c => ({ ...c, loading: true })))
+    comparisonsRef.current.forEach(c => fetchComp(c.symbol))
   }, [period])
 
   // Recherche avec debounce
