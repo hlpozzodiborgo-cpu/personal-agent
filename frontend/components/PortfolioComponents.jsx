@@ -7,6 +7,7 @@ export const PortfolioSummary = ({ portfolio }) => {
   const stats = portfolio.stats
   const gainLoss = stats.total_gain_loss
   const gainLossPercent = stats.gain_loss_percent
+  const distinctCount = new Set((portfolio.holdings || []).map(h => h.symbol)).size
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
@@ -25,13 +26,13 @@ export const PortfolioSummary = ({ portfolio }) => {
       </div>
       <div className="bg-white rounded-lg p-6 shadow">
         <h3 className="text-gray-500 text-sm font-medium">Titres distincts</h3>
-        <p className="text-2xl font-bold mt-2">{stats.number_of_holdings}</p>
+        <p className="text-2xl font-bold mt-2">{distinctCount}</p>
       </div>
     </div>
   )
 }
 
-export const HoldingsList = ({ holdings, onDelete }) => {
+export const HoldingsList = ({ holdings, onDelete, onEdit }) => {
   if (!holdings || holdings.length === 0) {
     return (
       <div className="bg-white rounded-lg p-6 shadow text-center">
@@ -78,13 +79,24 @@ export const HoldingsList = ({ holdings, onDelete }) => {
                   <div className="text-xs">{formatPercent(holding.gain_loss_percent)}</div>
                 </td>
                 <td className="px-6 py-4">
-                  <button
-                    onClick={() => handleDelete(holding.id, holding.symbol)}
-                    className="text-gray-400 hover:text-red-600 text-xl transition"
-                    title="Supprimer cette position"
-                  >
-                    🗑️
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => onEdit && onEdit(holding)}
+                      className="text-gray-400 hover:text-blue-600 transition"
+                      title="Modifier cet ordre"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => handleDelete(holding.id, holding.symbol)}
+                      className="text-gray-400 hover:text-red-600 text-xl transition"
+                      title="Supprimer cette position"
+                    >
+                      🗑️
+                    </button>
+                  </div>
                 </td>
               </tr>
             )

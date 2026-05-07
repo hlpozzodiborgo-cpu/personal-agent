@@ -537,7 +537,7 @@ class FinanceService:
             total_current_value += current_value
             
             holdings_stats.append({
-                "id": holding.get("id"),  # 🔑 Inclure l'ID pour la suppression frontend
+                "id": holding.get("id"),
                 "symbol": holding["symbol"],
                 "name": holding["name"],
                 "quantity": quantity,
@@ -546,7 +546,9 @@ class FinanceService:
                 "invested": invested,
                 "current_value": current_value,
                 "gain_loss": gain_loss,
-                "gain_loss_percent": gain_loss_percent
+                "gain_loss_percent": gain_loss_percent,
+                "purchase_date": holding.get("purchase_date"),
+                "notes": holding.get("notes"),
             })
         
         total_gain_loss = total_current_value - total_invested

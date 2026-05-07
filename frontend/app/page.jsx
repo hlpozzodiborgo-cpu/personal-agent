@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react'
 import { getPortfolio, getAssets, checkHealth, removeHolding } from '@/lib/api'
 import { PortfolioSummary, HoldingsList, ConsolidatedView, TopPerformers } from '@/components/PortfolioComponents'
-import { AddAssetModal, AddHoldingModal, SettingsModal } from '@/components/Modals'
+import { AddAssetModal, AddHoldingModal, EditHoldingModal, SettingsModal } from '@/components/Modals'
 
 export default function Home() {
   const [portfolio, setPortfolio] = useState(null)
@@ -17,6 +17,7 @@ export default function Home() {
   const [showAddAsset, setShowAddAsset] = useState(false)
   const [showAddHolding, setShowAddHolding] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [editingHolding, setEditingHolding] = useState(null)
 
   useEffect(() => {
     loadData()
@@ -158,7 +159,7 @@ export default function Home() {
                 <ConsolidatedView holdings={portfolio.holdings} />
               )}
               {activeTab === 'positions' && (
-                <HoldingsList holdings={portfolio.holdings} onDelete={handleDeleteHolding} />
+                <HoldingsList holdings={portfolio.holdings} onDelete={handleDeleteHolding} onEdit={setEditingHolding} />
               )}
             </div>
 
@@ -175,6 +176,7 @@ export default function Home() {
 
       <AddAssetModal isOpen={showAddAsset} onClose={() => setShowAddAsset(false)} onSuccess={loadData} />
       <AddHoldingModal isOpen={showAddHolding} onClose={() => setShowAddHolding(false)} onSuccess={loadData} availableAssets={assets} />
+      <EditHoldingModal isOpen={!!editingHolding} holding={editingHolding} onClose={() => setEditingHolding(null)} onSuccess={loadData} />
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
 
       <footer className="bg-white border-t border-gray-200 mt-12 py-6">
