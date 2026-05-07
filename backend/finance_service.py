@@ -13,9 +13,11 @@ logger = logging.getLogger(__name__)
 
 FINNHUB_BASE_URL = "https://finnhub.io/api/v1"
 
-# 🎯 CACHE EN MÉMOIRE: {symbol: {data, timestamp}}
 PRICE_CACHE = {}
-CACHE_EXPIRY_MINUTES = 10  # Rafraîchissement toutes les 10 minutes
+CACHE_EXPIRY_MINUTES = 10
+
+# Cle Finnhub active (chargee depuis DB au demarrage, surcharge le .env)
+_finnhub_key_override: Optional[str] = None
 
 # 📁 FALLBACK DONNÉES: quand Yahoo est down
 MOCK_DATA = {
@@ -169,6 +171,19 @@ MOCK_DATA = {
 class FinanceService:
 
     @staticmethod
+    def get_finnhub_key() -> Optional[str]:
+        global _finnhub_key_override
+        if _finnhub_key_override:
+            return _finnhub_key_override
+        from config import FINNHUB_API_KEY
+        return FINNHUB_API_KEY
+
+    @staticmethod
+    def set_finnhub_key(key: str) -> None:
+        global _finnhub_key_override
+        _finnhub_key_override = key or None
+
+    @staticmethod
     def _is_crypto(symbol: str) -> bool:
         """Les cryptos et devises ne sont pas supportées par Finnhub en tier gratuit"""
         return "-USD" in symbol or "-EUR" in symbol or "=X" in symbol
@@ -176,7 +191,7 @@ class FinanceService:
     @staticmethod
     def _get_quote_finnhub(symbol: str) -> Optional[float]:
         """Prix actuel depuis Finnhub (1 appel API, ~200ms)"""
-        from config import FINNHUB_API_KEY
+        FINNHUB_API_KEY = FinanceService.get_finnhub_key()
         if not FINNHUB_API_KEY:
             return None
         try:
@@ -199,7 +214,7 @@ class FinanceService:
     @staticmethod
     def _get_info_finnhub(symbol: str) -> Optional[Dict]:
         """Infos complètes depuis Finnhub (quote + profil, 2 appels API)"""
-        from config import FINNHUB_API_KEY
+        FINNHUB_API_KEY = FinanceService.get_finnhub_key()
         if not FINNHUB_API_KEY:
             return None
         try:

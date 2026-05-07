@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react'
 import { getPortfolio, getAssets, checkHealth, removeHolding } from '@/lib/api'
 import { PortfolioSummary, HoldingsList, TopPerformers } from '@/components/PortfolioComponents'
-import { AddAssetModal, AddHoldingModal } from '@/components/Modals'
+import { AddAssetModal, AddHoldingModal, SettingsModal } from '@/components/Modals'
 
 export default function Home() {
   const [portfolio, setPortfolio] = useState(null)
@@ -12,15 +12,14 @@ export default function Home() {
   const [error, setError] = useState('')
   const [apiHealth, setApiHealth] = useState(null)
   const [deleting, setDeleting] = useState(false)
-  
-  // Modals
+
   const [showAddAsset, setShowAddAsset] = useState(false)
   const [showAddHolding, setShowAddHolding] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
 
-  // Charge les données
   useEffect(() => {
     loadData()
-    const interval = setInterval(loadData, 60000) // Actualise toutes les minutes
+    const interval = setInterval(loadData, 60000)
     return () => clearInterval(interval)
   }, [])
 
@@ -28,8 +27,6 @@ export default function Home() {
     try {
       setLoading(true)
       setError('')
-      
-      // Vérifier la santé de l'API
       try {
         await checkHealth()
         setApiHealth('ok')
@@ -38,13 +35,7 @@ export default function Home() {
         setError('❌ Impossible de se connecter à l\'API. Vérifiez que le backend est en cours d\'exécution.')
         return
       }
-
-      // Charger le portfolio et les actifs
-      const [portfolioRes, assetsRes] = await Promise.all([
-        getPortfolio(),
-        getAssets()
-      ])
-
+      const [portfolioRes, assetsRes] = await Promise.all([getPortfolio(), getAssets()])
       setPortfolio(portfolioRes.data)
       setAssets(assetsRes.data)
     } catch (err) {
@@ -60,7 +51,6 @@ export default function Home() {
     try {
       setDeleting(true)
       await removeHolding(holdingId)
-      // Rafraîchir les données
       await loadData()
     } catch (err) {
       setError(`Erreur lors de la suppression: ${err.message}`)
@@ -92,6 +82,16 @@ export default function Home() {
                   Déconnectée
                 </div>
               )}
+              <button
+                onClick={() => setShowSettings(true)}
+                className="p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition"
+                title="Paramètres"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </button>
             </div>
           </div>
         </div>
@@ -99,37 +99,20 @@ export default function Home() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        {/* Action Buttons */}
         <div className="mb-8 flex gap-3">
-          <button
-            onClick={() => setShowAddAsset(true)}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2"
-          >
+          <button onClick={() => setShowAddAsset(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2">
             ➕ Ajouter des Actifs
           </button>
-          <button
-            onClick={() => setShowAddHolding(true)}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center gap-2"
-            disabled={assets.length === 0}
-          >
+          <button onClick={() => setShowAddHolding(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center gap-2" disabled={assets.length === 0}>
             📊 Ajouter une Position
           </button>
-          <button
-            onClick={loadData}
-            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2"
-          >
+          <button onClick={loadData} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2">
             🔄 Actualiser
           </button>
         </div>
 
-        {/* Error Message */}
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-            {error}
-          </div>
-        )}
+        {error && <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">{error}</div>}
 
-        {/* Loading State */}
         {loading && (
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
@@ -137,50 +120,28 @@ export default function Home() {
           </div>
         )}
 
-        {/* Content */}
         {!loading && portfolio && (
           <>
             <PortfolioSummary portfolio={portfolio} />
-            
             <div className="mb-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-4">Mes Positions</h2>
-              <HoldingsList 
-                holdings={portfolio.holdings} 
-                onDelete={handleDeleteHolding}
-              />
+              <HoldingsList holdings={portfolio.holdings} onDelete={handleDeleteHolding} />
             </div>
-
-            <TopPerformers 
-              topGainer={portfolio.top_gainer}
-              topLoser={portfolio.top_loser}
-            />
+            <TopPerformers topGainer={portfolio.top_gainer} topLoser={portfolio.top_loser} />
           </>
         )}
 
         {!loading && !portfolio && (
           <div className="bg-white rounded-lg p-12 shadow text-center">
-            <p className="text-gray-500 text-lg">
-              Aucun portefeuille encore. Commencez par ajouter des actifs et des positions!
-            </p>
+            <p className="text-gray-500 text-lg">Aucun portefeuille encore. Commencez par ajouter des actifs et des positions!</p>
           </div>
         )}
       </main>
 
-      {/* Modals */}
-      <AddAssetModal 
-        isOpen={showAddAsset}
-        onClose={() => setShowAddAsset(false)}
-        onSuccess={loadData}
-      />
+      <AddAssetModal isOpen={showAddAsset} onClose={() => setShowAddAsset(false)} onSuccess={loadData} />
+      <AddHoldingModal isOpen={showAddHolding} onClose={() => setShowAddHolding(false)} onSuccess={loadData} availableAssets={assets} />
+      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
 
-      <AddHoldingModal
-        isOpen={showAddHolding}
-        onClose={() => setShowAddHolding(false)}
-        onSuccess={loadData}
-        availableAssets={assets}
-      />
-
-      {/* Footer */}
       <footer className="bg-white border-t border-gray-200 mt-12 py-6">
         <div className="max-w-7xl mx-auto px-4 text-center text-gray-600 text-sm">
           <p>💡 Phase 1 en place: Dashboard de suivi. Phase 2: Actualités & Recommandations IA à venir</p>
