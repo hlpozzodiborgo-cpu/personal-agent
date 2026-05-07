@@ -329,16 +329,12 @@ export const PortfolioChart = () => {
     }))
   }, [portfolioRaw, comparisons, hasComp])
 
-  // Métriques — mode solo : valeur absolue / mode comparaison : TWR
-  const rawFirst   = portfolioRaw[0]?.value
-  const rawLast    = portfolioRaw[portfolioRaw.length - 1]?.value
-  const change     = rawFirst && rawLast ? rawLast - rawFirst : null
-  const changePct  = rawFirst && change  ? (change / rawFirst) * 100 : null
-  const twrFirst   = portfolioRaw[0]?.twr      // 100 au départ
-  const twrLast    = portfolioRaw[portfolioRaw.length - 1]?.twr
-  const twrPct     = twrLast !== undefined ? twrLast - 100 : changePct
-  const isPos      = hasComp ? (twrPct === null || twrPct >= 0) : (change === null || change >= 0)
-  const portColor  = isPos ? '#10b981' : '#ef4444'
+  // Métriques — TWR partout (exclut les apports de capital)
+  const rawLast   = portfolioRaw[portfolioRaw.length - 1]?.value
+  const twrLast   = portfolioRaw[portfolioRaw.length - 1]?.twr
+  const twrPct    = twrLast !== undefined ? twrLast - 100 : null
+  const isPos     = twrPct === null || twrPct >= 0
+  const portColor = isPos ? '#10b981' : '#ef4444'
 
   const formatTick = (s) => {
     const d = new Date(s)
@@ -387,10 +383,10 @@ export const PortfolioChart = () => {
           {!hasComp && rawLast && (
             <>
               <p className="text-3xl font-bold text-gray-900">{formatCurrency(rawLast)}</p>
-              {change !== null && (
+              {twrPct !== null && (
                 <p className={`text-sm font-medium mt-1 ${isPos ? 'text-green-600' : 'text-red-600'}`}>
-                  {isPos ? '+' : ''}{formatCurrency(change)} ({isPos ? '+' : ''}{changePct.toFixed(2)}%)
-                  <span className="text-gray-400 font-normal ml-1">sur la période</span>
+                  {isPos ? '+' : ''}{twrPct.toFixed(2)}%
+                  <span className="text-gray-400 font-normal ml-1">sur la période · hors apports</span>
                 </p>
               )}
             </>
