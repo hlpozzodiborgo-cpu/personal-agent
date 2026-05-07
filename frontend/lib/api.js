@@ -38,7 +38,12 @@ export const addHolding = (assetId, quantity, purchaseDate, price = null, notes 
     params: { asset_id: assetId, quantity, purchase_date: purchaseDate, price, notes }
   })
 
-export const removeHolding = (holdingId) => 
+export const updateHolding = (holdingId, quantity, purchaseDate, price, notes = null) =>
+  api.put(`/api/holdings/${holdingId}`, null, {
+    params: { quantity, purchase_date: purchaseDate, price, notes }
+  })
+
+export const removeHolding = (holdingId) =>
   api.delete(`/api/holdings/${holdingId}`)
 
 // ============ SETTINGS ============

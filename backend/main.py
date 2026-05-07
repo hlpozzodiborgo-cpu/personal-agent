@@ -10,7 +10,7 @@ from datetime import datetime
 import logging
 
 from config import DATABASE_URL, DEBUG
-from models import Base, Asset as AssetModel, Transaction as TransactionModel, AppSetting
+from models import Base, Asset as AssetModel, Holding as HoldingModel, Transaction as TransactionModel, AppSetting
 from schemas import (
     AssetCreate, Asset, HoldingCreate, Holding,
     PortfolioStats, PortfolioDetailResponse, TransactionCreate
@@ -316,7 +316,9 @@ async def get_portfolio_overview(db: Session = Depends(get_db)):
                 "quantity": holding.quantity,
                 "avg_purchase_price": holding.avg_purchase_price,
                 "current_price": live_price,
-                "total_invested": holding.total_cost
+                "total_invested": holding.total_cost,
+                "purchase_date": holding.purchase_date.strftime("%Y-%m-%d") if holding.purchase_date else None,
+                "notes": holding.notes
             })
         
         # Calcule les stats
@@ -328,7 +330,7 @@ async def get_portfolio_overview(db: Session = Depends(get_db)):
                 "total_current_value": stats["total_current_value"],
                 "total_gain_loss": stats["total_gain_loss"],
                 "gain_loss_percent": stats["total_gain_loss_percent"],
-                "number_of_holdings": stats["number_of_holdings"],
+                "number_of_holdings": len(set(h["symbol"] for h in holdings_data)),
                 "last_updated": datetime.utcnow().isoformat()
             },
             "holdings": stats["holdings"],
@@ -341,6 +343,43 @@ async def get_portfolio_overview(db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+@app.put("/api/holdings/{holding_id}", tags=["Holdings"])
+async def update_holding(
+    holding_id: int,
+    quantity: float,
+    purchase_date: str,
+    price: float,
+    notes: str = None,
+    db: Session = Depends(get_db)
+):
+    holding = db.query(HoldingModel).filter(
+        HoldingModel.id == holding_id, HoldingModel.is_active == True
+    ).first()
+    if not holding:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Position non trouvee")
+    try:
+        purchase_dt = datetime.strptime(purchase_date, "%Y-%m-%d")
+        holding.quantity = quantity
+        holding.avg_purchase_price = price
+        holding.total_cost = quantity * price
+        holding.purchase_date = purchase_dt
+        holding.notes = notes
+        transaction = db.query(TransactionModel).filter(
+            TransactionModel.holding_id == holding_id
+        ).first()
+        if transaction:
+            transaction.quantity = quantity
+            transaction.price_per_unit = price
+            transaction.total_amount = quantity * price
+            transaction.date = purchase_dt
+            transaction.notes = notes or "Position initiale"
+        db.commit()
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Erreur modification position: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.delete("/api/holdings/{holding_id}", tags=["Holdings"])
