@@ -10,7 +10,7 @@ from datetime import datetime
 import logging
 
 from config import DATABASE_URL, DEBUG
-from models import Base, Asset as AssetModel, Transaction as TransactionModel
+from models import Base, Asset as AssetModel, Transaction as TransactionModel, AppSetting
 from schemas import (
     AssetCreate, Asset, HoldingCreate, Holding,
     PortfolioStats, PortfolioDetailResponse, TransactionCreate
@@ -35,6 +35,15 @@ with engine.connect() as _conn:
         _conn.commit()
     except Exception:
         pass
+
+# Charger la cle Finnhub depuis la DB (priorite sur le .env)
+_startup_db = SessionLocal()
+try:
+    _setting = _startup_db.query(AppSetting).filter(AppSetting.key == "finnhub_api_key").first()
+    if _setting and _setting.value:
+        FinanceService.set_finnhub_key(_setting.value)
+finally:
+    _startup_db.close()
 
 # FastAPI app
 app = FastAPI(
@@ -351,6 +360,32 @@ async def remove_holding(holding_id: int, db: Session = Depends(get_db)):
             detail="Position non trouvée"
         )
     return {"success": True, "message": "Position supprimée"}
+
+
+# ============ SETTINGS ============
+@app.get("/api/settings", tags=["Settings"])
+async def get_settings():
+    return {"finnhub_configured": bool(FinanceService.get_finnhub_key())}
+
+
+@app.put("/api/settings/finnhub-key", tags=["Settings"])
+async def update_finnhub_key(key: str, db: Session = Depends(get_db)):
+    setting = db.query(AppSetting).filter(AppSetting.key == "finnhub_api_key").first()
+    if setting:
+        setting.value = key
+    else:
+        db.add(AppSetting(key="finnhub_api_key", value=key))
+    db.commit()
+    FinanceService.set_finnhub_key(key)
+    return {"success": True}
+
+
+@app.get("/api/settings/test-finnhub", tags=["Settings"])
+async def test_finnhub_key():
+    price = FinanceService._get_quote_finnhub("AAPL")
+    if price:
+        return {"success": True, "message": f"Cle valide — AAPL: ${price:.2f}"}
+    return {"success": False, "message": "Cle invalide ou limite atteinte"}
 
 
 # ============ ROOT ============

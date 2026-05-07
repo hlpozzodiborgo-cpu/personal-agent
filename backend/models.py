@@ -74,6 +74,13 @@ class PriceHistory(Base):
     asset = relationship("Asset", back_populates="price_history")
 
 
+class AppSetting(Base):
+    """Parametres de l'application (cles API, preferences)"""
+    __tablename__ = "app_settings"
+    key = Column(String, primary_key=True)
+    value = Column(Text, nullable=True)
+
+
 class PortfolioSnapshot(Base):
     """Snapshot du portefeuille pour historique"""
     __tablename__ = "portfolio_snapshots"
