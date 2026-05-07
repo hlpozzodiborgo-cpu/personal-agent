@@ -50,6 +50,7 @@ export const HoldingsList = ({ holdings, onDelete, onEdit }) => {
       <table className="w-full">
         <thead className="bg-gray-50 border-b">
           <tr>
+            <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Date</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Actif</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Qté</th>
             <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Prix d'Achat</th>
@@ -63,8 +64,12 @@ export const HoldingsList = ({ holdings, onDelete, onEdit }) => {
         <tbody>
           {holdings.map((holding, idx) => {
             const gainLoss = holding.gain_loss
+            const dateLabel = holding.purchase_date
+              ? new Date(holding.purchase_date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
+              : '—'
             return (
               <tr key={idx} className="border-b hover:bg-gray-50">
+                <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">{dateLabel}</td>
                 <td className="px-6 py-4">
                   <p className="font-semibold text-gray-900">{holding.symbol}</p>
                   <p className="text-xs text-gray-500">{holding.name}</p>
@@ -79,7 +84,7 @@ export const HoldingsList = ({ holdings, onDelete, onEdit }) => {
                   <div className="text-xs">{formatPercent(holding.gain_loss_percent)}</div>
                 </td>
                 <td className="px-6 py-4">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-6">
                     <button
                       onClick={() => onEdit && onEdit(holding)}
                       className="text-gray-400 hover:text-blue-600 transition"
