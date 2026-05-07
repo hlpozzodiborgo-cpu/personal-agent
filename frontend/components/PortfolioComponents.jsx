@@ -397,10 +397,8 @@ export const PortfolioChart = () => {
   const isPos     = hasComp ? (twrPct === null || twrPct >= 0) : (soloPct === null || soloPct >= 0)
   const portColor = isPos ? '#10b981' : '#ef4444'
 
-  // Intervalle de ticks adapté à la densité des données
-  const xAxisInterval = period === '1mo'
-    ? Math.max(1, Math.floor(chartData.length / 8))  // ~8 ticks pour 1 mois
-    : 'preserveStartEnd'
+  // ~8 ticks répartis uniformément sur tous les périodes (évite le vide avant le dernier tick)
+  const xAxisInterval = Math.max(1, Math.floor(chartData.length / 8))
 
   const formatY = hasComp
     ? v => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
