@@ -309,24 +309,42 @@ export const PortfolioChart = () => {
     if (!portfolioRaw.length) return []
     if (!hasComp) return portfolioRaw
 
-    // Mode comparaison : portefeuille en TWR (élimine l'effet des dépôts),
-    // actifs de comparaison en % simple (pas de flux de trésorerie).
-    // Les deux démarrent à 0 % — comparaison équitable.
     const portNorm = portfolioRaw.map(d => ({
       date: d.date,
       pct: d.twr !== undefined ? d.twr - 100 : ((d.value / portfolioRaw[0].value) - 1) * 100
     }))
 
-    const portfolioStartDate = portfolioRaw[0]?.date ?? ''
+    // Détecte si les données du portefeuille sont intraday (horodatage avec heure)
+    const isIntraday = portNorm.some(d => d.date?.includes('T'))
+    const portfolioStartDateKey = (portNorm[0]?.date ?? '').split('T')[0]
+
+    // Pour intraday : normalise depuis la première donnée dispo (cohérent avec TWR)
+    // Pour daily    : normalise depuis la date de début du portefeuille (alignement Tout/1A)
     const compMaps = comparisons
       .filter(c => c.visible && c.data.length > 0)
-      .map(c => ({ symbol: c.symbol, map: new Map(normalizeFromDate(c.data, portfolioStartDate).map(d => [d.date, d.pct])) }))
+      .map(c => {
+        const norm = isIntraday
+          ? normalize(c.data)
+          : normalizeFromDate(c.data, portfolioStartDateKey)
+        return { symbol: c.symbol, map: new Map(norm.map(d => [d.date.split('T')[0], d.pct])) }
+      })
 
-    return portNorm.map(d => ({
-      date: d.date,
-      portfolio: d.pct,
-      ...Object.fromEntries(compMaps.map(cm => [cm.symbol, cm.map.get(d.date) ?? null]))
-    }))
+    // Pour intraday : une seule valeur de comparaison par jour (premier timestamp),
+    // connectNulls=true trace une ligne lisse entre les points journaliers.
+    const seenDates = new Set()
+    return portNorm.map(d => {
+      const dk = d.date.split('T')[0]
+      const isFirst = !seenDates.has(dk)
+      if (isFirst) seenDates.add(dk)
+      return {
+        date: d.date,
+        portfolio: d.pct,
+        ...Object.fromEntries(compMaps.map(cm => [
+          cm.symbol,
+          isFirst ? cm.map.get(dk) ?? null : null
+        ]))
+      }
+    })
   }, [portfolioRaw, comparisons, hasComp])
 
   // Métriques — TWR partout (exclut les apports de capital)
@@ -404,7 +422,9 @@ export const PortfolioChart = () => {
                 <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded font-normal" title="Time-Weighted Return — élimine l'effet des dépôts">TWR</span>
               </div>
               {comparisons.filter(c => c.visible && c.data.length > 0).map(c => {
-                const n = normalizeFromDate(c.data, portfolioRaw[0]?.date ?? '')
+                const isIntraday = portfolioRaw.some(d => d.date?.includes('T'))
+                const startKey = (portfolioRaw[0]?.date ?? '').split('T')[0]
+                const n = isIntraday ? normalize(c.data) : normalizeFromDate(c.data, startKey)
                 const last = n[n.length - 1]?.pct
                 return (
                   <div key={c.symbol} className="flex items-center gap-1.5 text-sm">

@@ -281,7 +281,7 @@ async def get_asset_price_history(symbol: str, period: str = "1mo"):
     import requests as req
     from datetime import datetime, timedelta
     period_cfg = {
-        "1d":  (timedelta(days=1),    "5m"),
+        "1d":  (timedelta(days=2),    "1d"),   # veille + aujourd'hui comme reference
         "1w":  (timedelta(weeks=1),   "1d"),
         "1mo": (timedelta(days=30),   "1d"),
         "1y":  (timedelta(days=365),  "1d"),
@@ -329,10 +329,10 @@ async def get_portfolio_history(period: str = "1mo", db: Session = Depends(get_d
     now = datetime.now()
     period_cfg = {
         "1d":  (now - __import__('datetime').timedelta(days=1),   "5m"),
-        "1w":  (now - __import__('datetime').timedelta(weeks=1),   "1d"),
-        "1mo": (now - __import__('datetime').timedelta(days=30),   "1d"),
-        "1y":  (now - __import__('datetime').timedelta(days=365),  "1d"),
-        "all": (None,                                               "1d"),
+        "1w":  (now - __import__('datetime').timedelta(weeks=1),  "1h"),
+        "1mo": (now - __import__('datetime').timedelta(days=30),  "1d"),
+        "1y":  (now - __import__('datetime').timedelta(days=365), "1d"),
+        "all": (None,                                             "1d"),
     }
     start_dt, interval = period_cfg.get(period, period_cfg["1mo"])
 
