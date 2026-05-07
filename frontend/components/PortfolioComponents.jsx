@@ -231,6 +231,16 @@ const normalize = (data) => {
   return data.map(d => ({ date: d.date, pct: ((d.value / first) - 1) * 100 }))
 }
 
+// Normalise un actif depuis une date de référence (date de début du portefeuille).
+// Garantit que toutes les courbes démarrent à 0% au même point.
+const normalizeFromDate = (data, startDate) => {
+  if (!data?.length) return []
+  const entry = data.find(d => d.date >= startDate) || data[0]
+  if (!entry?.value) return normalize(data)
+  const base = entry.value
+  return data.map(d => ({ date: d.date, pct: ((d.value / base) - 1) * 100 }))
+}
+
 export const PortfolioChart = () => {
   const [period, setPeriod]           = useState('1mo')
   const [portfolioRaw, setPortfolioRaw] = useState([])
@@ -307,9 +317,10 @@ export const PortfolioChart = () => {
       pct: d.twr !== undefined ? d.twr - 100 : ((d.value / portfolioRaw[0].value) - 1) * 100
     }))
 
+    const portfolioStartDate = portfolioRaw[0]?.date ?? ''
     const compMaps = comparisons
       .filter(c => c.visible && c.data.length > 0)
-      .map(c => ({ symbol: c.symbol, map: new Map(normalize(c.data).map(d => [d.date, d.pct])) }))
+      .map(c => ({ symbol: c.symbol, map: new Map(normalizeFromDate(c.data, portfolioStartDate).map(d => [d.date, d.pct])) }))
 
     return portNorm.map(d => ({
       date: d.date,
@@ -397,7 +408,7 @@ export const PortfolioChart = () => {
                 <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded font-normal" title="Time-Weighted Return — élimine l'effet des dépôts">TWR</span>
               </div>
               {comparisons.filter(c => c.visible && c.data.length > 0).map(c => {
-                const n = normalize(c.data)
+                const n = normalizeFromDate(c.data, portfolioRaw[0]?.date ?? '')
                 const last = n[n.length - 1]?.pct
                 return (
                   <div key={c.symbol} className="flex items-center gap-1.5 text-sm">
