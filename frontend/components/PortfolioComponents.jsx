@@ -242,15 +242,16 @@ const normalizeFromDate = (data, startDate) => {
 }
 
 export const PortfolioChart = () => {
-  const [period, setPeriod]           = useState('1mo')
+  const [period, setPeriod]             = useState('1mo')
   const [portfolioRaw, setPortfolioRaw] = useState([])
-  const [orderDates, setOrderDates]   = useState([])
-  const [loading, setLoading]         = useState(true)
-  const [comparisons, setComparisons] = useState([])  // {symbol,name,color,visible,data,loading}
-  const [query, setQuery]             = useState('')
-  const [results, setResults]         = useState([])
-  const [searching, setSearching]     = useState(false)
-  const [showDrop, setShowDrop]       = useState(false)
+  const [orderDates, setOrderDates]     = useState([])
+  const [totalInvested, setTotalInvested] = useState(null)
+  const [loading, setLoading]           = useState(true)
+  const [comparisons, setComparisons]   = useState([])
+  const [query, setQuery]               = useState('')
+  const [results, setResults]           = useState([])
+  const [searching, setSearching]       = useState(false)
+  const [showDrop, setShowDrop]         = useState(false)
 
   const hasComp = comparisons.length > 0
   // Ref pour éviter le problème de closure dans les useEffect
@@ -261,7 +262,11 @@ export const PortfolioChart = () => {
   useEffect(() => {
     if (portfolioRaw.length === 0) setLoading(true)
     getPortfolioHistory(period)
-      .then(r => { setPortfolioRaw(r.data.data || []); setOrderDates(r.data.order_dates || []) })
+      .then(r => {
+        setPortfolioRaw(r.data.data || [])
+        setOrderDates(r.data.order_dates || [])
+        if (r.data.total_invested) setTotalInvested(r.data.total_invested)
+      })
       .finally(() => setLoading(false))
   }, [period])
 
@@ -347,18 +352,31 @@ export const PortfolioChart = () => {
     })
   }, [portfolioRaw, comparisons, hasComp])
 
-  // Métriques — TWR partout (exclut les apports de capital)
+  // Métriques
+  const rawFirst  = portfolioRaw[0]?.value
   const rawLast   = portfolioRaw[portfolioRaw.length - 1]?.value
   const twrLast   = portfolioRaw[portfolioRaw.length - 1]?.twr
   const twrPct    = twrLast !== undefined ? twrLast - 100 : null
-  const isPos     = twrPct === null || twrPct >= 0
+
+  // Mode solo : rendement simple adapté à la période
+  // - "all"   : (valeur_actuelle - capital_investi) / capital_investi  → gain réel sur le capital
+  // - autres  : (valeur_fin - valeur_début) / valeur_début            → variation de la période
+  const soloPct = period === 'all' && totalInvested && rawLast
+    ? ((rawLast - totalInvested) / totalInvested) * 100
+    : rawFirst && rawLast
+    ? ((rawLast / rawFirst) - 1) * 100
+    : null
+
+  const isPos     = hasComp ? (twrPct === null || twrPct >= 0) : (soloPct === null || soloPct >= 0)
   const portColor = isPos ? '#10b981' : '#ef4444'
 
   const formatTick = (s) => {
     const d = new Date(s)
     if (period === '1d')  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
     if (period === '1w')  return d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit' })
+                               + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
     if (period === '1mo') return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
+                               + (s?.includes('T') ? ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit' }) + 'h' : '')
     return d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
   }
 
@@ -401,10 +419,12 @@ export const PortfolioChart = () => {
           {!hasComp && rawLast && (
             <>
               <p className="text-3xl font-bold text-gray-900">{formatCurrency(rawLast)}</p>
-              {twrPct !== null && (
+              {soloPct !== null && (
                 <p className={`text-sm font-medium mt-1 ${isPos ? 'text-green-600' : 'text-red-600'}`}>
-                  {isPos ? '+' : ''}{twrPct.toFixed(2)}%
-                  <span className="text-gray-400 font-normal ml-1">sur la période · hors apports</span>
+                  {isPos ? '+' : ''}{soloPct.toFixed(2)}%
+                  <span className="text-gray-400 font-normal ml-1">
+                    {period === 'all' ? 'sur le capital investi' : 'sur la période'}
+                  </span>
                 </p>
               )}
             </>
@@ -473,7 +493,8 @@ export const PortfolioChart = () => {
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
             <XAxis dataKey="date" tickFormatter={formatTick} tick={{ fontSize: 11, fill: '#9ca3af' }}
-              tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={60} />
+              tickLine={false} axisLine={false} interval="preserveStartEnd"
+              minTickGap={period === '1w' || period === '1mo' ? 90 : 60} />
             <YAxis tickFormatter={formatY} tick={{ fontSize: 11, fill: '#9ca3af' }}
               tickLine={false} axisLine={false} width={56} domain={['auto', 'auto']} />
             <Tooltip content={<TooltipContent />} />

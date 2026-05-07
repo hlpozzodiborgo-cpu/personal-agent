@@ -330,7 +330,7 @@ async def get_portfolio_history(period: str = "1mo", db: Session = Depends(get_d
     period_cfg = {
         "1d":  (now - __import__('datetime').timedelta(days=1),   "5m"),
         "1w":  (now - __import__('datetime').timedelta(weeks=1),  "1h"),
-        "1mo": (now - __import__('datetime').timedelta(days=30),  "1d"),
+        "1mo": (now - __import__('datetime').timedelta(days=30),  "1h"),
         "1y":  (now - __import__('datetime').timedelta(days=365), "1d"),
         "all": (None,                                             "1d"),
     }
@@ -431,7 +431,10 @@ async def get_portfolio_history(period: str = "1mo", db: Session = Depends(get_d
         if h.purchase_date and h.purchase_date.timestamp() >= start_ts
     ))
 
-    return {"data": data, "order_dates": order_dates}
+    # Capital total investi (somme de tous les achats)
+    total_invested = round(sum(h.total_cost for h in holdings), 2)
+
+    return {"data": data, "order_dates": order_dates, "total_invested": total_invested}
 
 
 @app.get("/api/portfolio", tags=["Portfolio"], response_model=dict)
