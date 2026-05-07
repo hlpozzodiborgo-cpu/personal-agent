@@ -7,6 +7,3 @@ yfinance==0.2.32
 aiohttp==3.9.1
 requests==2.31.0
 python-dateutil==2.8.2
-cors==1.0.1
-fastapi-cors==0.0.6
-psycopg2-binary==2.9.9
