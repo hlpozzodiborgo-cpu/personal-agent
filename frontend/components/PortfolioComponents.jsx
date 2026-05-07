@@ -1,5 +1,10 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { formatCurrency, formatPercent, getColorClass, getBackgroundColorClass } from '@/lib/utils'
+import { getPortfolioHistory } from '@/lib/api'
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  ReferenceLine, ResponsiveContainer
+} from 'recharts'
 
 export const PortfolioSummary = ({ portfolio }) => {
   if (!portfolio || !portfolio.stats) return <div>Aucune donnée</div>
@@ -206,6 +211,179 @@ export const ConsolidatedView = ({ holdings }) => {
           })}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+const PERIODS = [
+  { key: '1d',  label: '1J' },
+  { key: '1w',  label: '1S' },
+  { key: '1mo', label: '1M' },
+  { key: '1y',  label: '1A' },
+  { key: 'all', label: 'Tout' },
+]
+
+const CustomTooltip = ({ active, payload, label, period }) => {
+  if (!active || !payload?.length) return null
+  const value = payload[0].value
+  const date = new Date(label)
+  const dateLabel = period === '1d'
+    ? date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: period === '1y' || period === 'all' ? '2-digit' : undefined })
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-4 py-3 text-sm">
+      <p className="text-gray-500 mb-1">{dateLabel}</p>
+      <p className="font-bold text-gray-900">{formatCurrency(value)}</p>
+    </div>
+  )
+}
+
+export const PortfolioChart = () => {
+  const [period, setPeriod] = useState('1mo')
+  const [chartData, setChartData] = useState([])
+  const [orderDates, setOrderDates] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    setError('')
+    getPortfolioHistory(period)
+      .then(res => {
+        setChartData(res.data.data || [])
+        setOrderDates(res.data.order_dates || [])
+      })
+      .catch(() => setError('Impossible de charger les données historiques.'))
+      .finally(() => setLoading(false))
+  }, [period])
+
+  const first = chartData[0]?.value ?? null
+  const last  = chartData[chartData.length - 1]?.value ?? null
+  const change = (first && last) ? last - first : null
+  const changePct = (first && change) ? (change / first) * 100 : null
+  const isPositive = change === null || change >= 0
+  const color = isPositive ? '#10b981' : '#ef4444'
+  const gradientId = isPositive ? 'gradGreen' : 'gradRed'
+
+  const formatTick = (str) => {
+    const d = new Date(str)
+    if (period === '1d')  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+    if (period === '1w')  return d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit' })
+    if (period === '1mo') return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
+    return d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
+  }
+
+  const formatY = (v) => {
+    if (v >= 10000) return `${(v / 1000).toFixed(0)}k€`
+    if (v >= 1000)  return `${(v / 1000).toFixed(1)}k€`
+    return `${v.toFixed(0)}€`
+  }
+
+  return (
+    <div className="bg-white rounded-lg shadow p-6">
+      {/* En-tête : valeur + performance + sélecteur */}
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          {last !== null && (
+            <>
+              <p className="text-3xl font-bold text-gray-900">{formatCurrency(last)}</p>
+              {change !== null && (
+                <p className={`text-sm font-medium mt-1 ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+                  {isPositive ? '+' : ''}{formatCurrency(change)} ({isPositive ? '+' : ''}{changePct.toFixed(2)}%)
+                  <span className="text-gray-400 font-normal ml-1">sur la période</span>
+                </p>
+              )}
+            </>
+          )}
+        </div>
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+          {PERIODS.map(p => (
+            <button
+              key={p.key}
+              onClick={() => setPeriod(p.key)}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                period === p.key
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Graphique */}
+      {loading ? (
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+        </div>
+      ) : error ? (
+        <div className="flex items-center justify-center h-64 text-red-500 text-sm">{error}</div>
+      ) : chartData.length < 2 ? (
+        <div className="flex items-center justify-center h-64 text-gray-400 text-sm">
+          Pas assez de données pour cette période.
+        </div>
+      ) : (
+        <ResponsiveContainer width="100%" height={300}>
+          <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+            <defs>
+              <linearGradient id="gradGreen" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor="#10b981" stopOpacity={0.18} />
+                <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="gradRed" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.18} />
+                <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+
+            <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+
+            <XAxis
+              dataKey="date"
+              tickFormatter={formatTick}
+              tick={{ fontSize: 11, fill: '#9ca3af' }}
+              tickLine={false}
+              axisLine={false}
+              interval="preserveStartEnd"
+              minTickGap={60}
+            />
+            <YAxis
+              tickFormatter={formatY}
+              tick={{ fontSize: 11, fill: '#9ca3af' }}
+              tickLine={false}
+              axisLine={false}
+              width={52}
+              domain={['auto', 'auto']}
+            />
+
+            <Tooltip content={<CustomTooltip period={period} />} />
+
+            {/* Traits rouges aux dates de passage d'ordre */}
+            {orderDates.map(d => (
+              <ReferenceLine
+                key={d}
+                x={d}
+                stroke="#ef4444"
+                strokeWidth={1}
+                strokeDasharray="4 3"
+                strokeOpacity={0.7}
+              />
+            ))}
+
+            <Area
+              type="monotone"
+              dataKey="value"
+              stroke={color}
+              strokeWidth={2}
+              fill={`url(#${gradientId})`}
+              dot={false}
+              activeDot={{ r: 4, fill: color, strokeWidth: 0 }}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      )}
     </div>
   )
 }

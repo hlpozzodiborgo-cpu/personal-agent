@@ -275,6 +275,88 @@ async def add_holding(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@app.get("/api/portfolio/history", tags=["Portfolio"])
+async def get_portfolio_history(period: str = "1mo", db: Session = Depends(get_db)):
+    """Valeur historique du portefeuille reconstituee jour par jour"""
+    import requests as req
+
+    holdings = HoldingCRUD.get_all_active(db)
+    if not holdings:
+        return {"data": [], "order_dates": []}
+
+    now = datetime.now()
+    period_cfg = {
+        "1d":  (now - __import__('datetime').timedelta(days=1),   "5m"),
+        "1w":  (now - __import__('datetime').timedelta(weeks=1),   "1h"),
+        "1mo": (now - __import__('datetime').timedelta(days=30),   "1d"),
+        "1y":  (now - __import__('datetime').timedelta(days=365),  "1d"),
+        "all": (None,                                               "1d"),
+    }
+    start_dt, interval = period_cfg.get(period, period_cfg["1mo"])
+
+    if start_dt is None:
+        valid_dates = [h.purchase_date for h in holdings if h.purchase_date]
+        if not valid_dates:
+            return {"data": [], "order_dates": []}
+        start_dt = min(valid_dates)
+
+    start_ts = int(start_dt.timestamp())
+    end_ts   = int(now.timestamp())
+    is_intraday = interval in ("5m", "1h")
+
+    # Prix historiques par symbole : {symbol: {timestamp: price}}
+    unique_symbols = list(set(h.asset.symbol for h in holdings))
+    symbol_prices = {}
+    for symbol in unique_symbols:
+        try:
+            r = req.get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                params={"period1": start_ts, "period2": end_ts, "interval": interval},
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+                timeout=10
+            )
+            if r.status_code != 200:
+                continue
+            result = r.json().get("chart", {}).get("result")
+            if not result:
+                continue
+            timestamps = result[0].get("timestamp", [])
+            closes = result[0]["indicators"]["quote"][0].get("close", [])
+            symbol_prices[symbol] = {
+                ts: price for ts, price in zip(timestamps, closes) if price is not None
+            }
+        except Exception as e:
+            logger.error(f"History error {symbol}: {e}")
+
+    if not symbol_prices:
+        return {"data": [], "order_dates": []}
+
+    # Reconstruction jour par jour
+    all_timestamps = sorted(set(ts for prices in symbol_prices.values() for ts in prices))
+    data = []
+    for ts in all_timestamps:
+        dt = datetime.fromtimestamp(ts)
+        date_str = dt.isoformat() if is_intraday else dt.strftime("%Y-%m-%d")
+        total = 0.0
+        for holding in holdings:
+            if holding.purchase_date and holding.purchase_date.date() > dt.date():
+                continue
+            price = symbol_prices.get(holding.asset.symbol, {}).get(ts)
+            if price:
+                total += holding.quantity * price
+        if total > 0:
+            data.append({"date": date_str, "value": round(total, 2)})
+
+    # Dates d'ordres dans la periode (pas pour intraday)
+    order_dates = [] if is_intraday else sorted(set(
+        h.purchase_date.strftime("%Y-%m-%d")
+        for h in holdings
+        if h.purchase_date and h.purchase_date.timestamp() >= start_ts
+    ))
+
+    return {"data": data, "order_dates": order_dates}
+
+
 @app.get("/api/portfolio", tags=["Portfolio"], response_model=dict)
 async def get_portfolio_overview(db: Session = Depends(get_db)):
     """

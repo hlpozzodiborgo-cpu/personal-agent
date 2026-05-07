@@ -46,6 +46,10 @@ export const updateHolding = (holdingId, quantity, purchaseDate, price, notes = 
 export const removeHolding = (holdingId) =>
   api.delete(`/api/holdings/${holdingId}`)
 
+// ============ PORTFOLIO HISTORY ============
+export const getPortfolioHistory = (period = '1mo') =>
+  api.get('/api/portfolio/history', { params: { period } })
+
 // ============ SETTINGS ============
 export const getSettings = () => api.get('/api/settings')
 export const updateFinnhubKey = (key) => api.put('/api/settings/finnhub-key', null, { params: { key } })
