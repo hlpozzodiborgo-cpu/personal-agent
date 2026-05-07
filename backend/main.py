@@ -373,10 +373,22 @@ async def get_portfolio_history(period: str = "1mo", db: Session = Depends(get_d
     if not symbol_prices:
         return {"data": [], "order_dates": []}
 
+    # Forward-fill : reporter le dernier prix connu sur les timestamps manquants.
+    # Nécessaire quand le portefeuille mixe des actifs de marchés différents
+    # (ex: ETF Euronext + action NYSE) qui ont des jours fériés distincts.
+    all_timestamps_sorted = sorted(set(ts for prices in symbol_prices.values() for ts in prices))
+    for symbol in symbol_prices:
+        last_price = None
+        for ts in all_timestamps_sorted:
+            if ts in symbol_prices[symbol]:
+                last_price = symbol_prices[symbol][ts]
+            elif last_price is not None:
+                symbol_prices[symbol][ts] = last_price
+
     # Reconstruction jour par jour avec TWR (Time-Weighted Return)
     # Le TWR elimine l'effet des depot/retraits pour comparer equitablement
     # avec d'autres actifs. Standard industrie (CFA Institute).
-    all_timestamps = sorted(set(ts for prices in symbol_prices.values() for ts in prices))
+    all_timestamps = all_timestamps_sorted
     data = []
     twr_factor = 1.0
     prev_total = None  # Valeur totale au timestamp precedent (avec tous les ordres actifs)
