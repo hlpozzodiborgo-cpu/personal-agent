@@ -748,6 +748,42 @@ async def test_newsapi_key():
         return {"success": False, "message": str(e)[:120]}
 
 
+# ============ ASSETS - DELETE ============
+@app.delete("/api/assets/{symbol}", tags=["Assets"])
+async def delete_asset(symbol: str, db: Session = Depends(get_db)):
+    """Supprime un actif et toutes ses positions/transactions."""
+    success = AssetCRUD.delete(db, symbol)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{symbol} non trouve")
+    return {"success": True, "message": f"{symbol} supprime"}
+
+
+# ============ PREFERENCES ============
+@app.get("/api/settings/preferences", tags=["Settings"])
+async def get_preferences(db: Session = Depends(get_db)):
+    def _val(key, default):
+        s = db.query(AppSetting).filter(AppSetting.key == key).first()
+        return s.value if s and s.value else default
+    return {
+        "investment_horizon": _val("investment_horizon", "long"),
+        "risk_appetite":      int(_val("risk_appetite", "3")),
+    }
+
+@app.put("/api/settings/preferences", tags=["Settings"])
+async def update_preferences(
+    investment_horizon: str,
+    risk_appetite: int,
+    db: Session = Depends(get_db),
+):
+    if investment_horizon not in ("short", "medium", "long"):
+        raise HTTPException(status_code=400, detail="Horizon invalide")
+    if not 1 <= risk_appetite <= 5:
+        raise HTTPException(status_code=400, detail="Risque entre 1 et 5")
+    _save_setting(db, "investment_horizon", investment_horizon)
+    _save_setting(db, "risk_appetite", str(risk_appetite))
+    return {"success": True}
+
+
 # ============ ROOT ============
 @app.get("/", tags=["Info"])
 async def root():

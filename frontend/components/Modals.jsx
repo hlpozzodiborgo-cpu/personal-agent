@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { addHolding, updateHolding, addAsset, searchAssets, getPriceAtDate, getSettings, updateFinnhubKey, updateAnthropicKey, updateNewsApiKey, updateGeminiKey, updateGroqKey, deleteFinnhubKey, deleteAnthropicKey, deleteNewsApiKey, deleteGeminiKey, deleteGroqKey, testFinnhubKey, testAnthropicKey, testNewsApiKey, testGeminiKey, testGroqKey, setAiProvider, getMaskedKey } from '@/lib/api'
+import { addHolding, updateHolding, addAsset, searchAssets, getPriceAtDate, getSettings, updateFinnhubKey, updateAnthropicKey, updateNewsApiKey, updateGeminiKey, updateGroqKey, deleteFinnhubKey, deleteAnthropicKey, deleteNewsApiKey, deleteGeminiKey, deleteGroqKey, testFinnhubKey, testAnthropicKey, testNewsApiKey, testGeminiKey, testGroqKey, setAiProvider, getMaskedKey, getPreferences, updatePreferences } from '@/lib/api'
 
 export const AddAssetModal = ({ isOpen, onClose, onSuccess }) => {
   const [query, setQuery] = useState('')
@@ -354,11 +354,108 @@ const AI_PROVIDERS = [
   { id: 'groq',    label: 'Llama 3.1 70B (Groq)',badge: '14 400 req/jour',  free: true  },
 ]
 
+const RISK_LEVELS = [
+  { value: 1, label: 'Très défensif',   color: 'bg-blue-100 text-blue-800',   examples: 'Livret A, fonds euros, obligations d\'État' },
+  { value: 2, label: 'Défensif',        color: 'bg-teal-100 text-teal-800',   examples: 'ETF obligataires, fonds prudents (80 % obligations)' },
+  { value: 3, label: 'Équilibré',       color: 'bg-green-100 text-green-800', examples: 'ETF indiciels (S&P 500, MSCI World), fonds mixtes' },
+  { value: 4, label: 'Dynamique',       color: 'bg-amber-100 text-amber-800', examples: 'Actions individuelles, ETF sectoriels, marchés émergents' },
+  { value: 5, label: 'Très dynamique',  color: 'bg-red-100 text-red-800',     examples: 'Crypto, options, levier, petites capitalisations' },
+]
+
+const HORIZONS = [
+  { id: 'short',  label: 'Court terme',  sub: '< 1 an',   icon: '⚡' },
+  { id: 'medium', label: 'Moyen terme',  sub: '1 – 5 ans', icon: '📅' },
+  { id: 'long',   label: 'Long terme',   sub: '> 5 ans',   icon: '🌱' },
+]
+
+const PreferencesTab = () => {
+  const [horizon, setHorizon] = useState('long')
+  const [risk, setRisk]       = useState(3)
+  const [saving, setSaving]   = useState(false)
+  const [saved, setSaved]     = useState(false)
+
+  useEffect(() => {
+    getPreferences()
+      .then(r => { setHorizon(r.data.investment_horizon); setRisk(r.data.risk_appetite) })
+      .catch(() => {})
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await updatePreferences(horizon, risk)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch {}
+    finally { setSaving(false) }
+  }
+
+  const current = RISK_LEVELS.find(l => l.value === risk) || RISK_LEVELS[2]
+
+  return (
+    <div className="space-y-6">
+      {/* Horizon */}
+      <div>
+        <p className="text-sm font-semibold text-gray-700 mb-3">Horizon d'investissement</p>
+        <div className="grid grid-cols-3 gap-2">
+          {HORIZONS.map(h => (
+            <button key={h.id} onClick={() => setHorizon(h.id)}
+              className={`p-3 rounded-lg border text-left transition ${
+                horizon === h.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+              }`}>
+              <span className="text-xl">{h.icon}</span>
+              <p className="text-sm font-medium text-gray-800 mt-1">{h.label}</p>
+              <p className="text-xs text-gray-400">{h.sub}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Risque */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-semibold text-gray-700">Appétence au risque</p>
+          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${current.color}`}>
+            {current.label}
+          </span>
+        </div>
+
+        {/* Curseur */}
+        <input type="range" min={1} max={5} step={1} value={risk}
+          onChange={e => setRisk(Number(e.target.value))}
+          className="w-full h-2 rounded-lg appearance-none cursor-pointer accent-blue-600 mb-3" />
+
+        {/* Graduations */}
+        <div className="flex justify-between mb-4">
+          {RISK_LEVELS.map(l => (
+            <button key={l.value} onClick={() => setRisk(l.value)}
+              className={`text-xs font-medium transition ${risk === l.value ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}>
+              {l.value}
+            </button>
+          ))}
+        </div>
+
+        {/* Fiche du niveau sélectionné */}
+        <div className={`p-4 rounded-lg border ${current.color.replace('text-', 'border-').replace('100', '200')} bg-opacity-50`}>
+          <p className="text-sm font-semibold mb-1">Niveau {risk}/5 — {current.label}</p>
+          <p className="text-xs text-gray-600">Exemples : {current.examples}</p>
+        </div>
+      </div>
+
+      <button onClick={handleSave} disabled={saving}
+        className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium text-sm">
+        {saving ? 'Enregistrement…' : saved ? '✓ Préférences sauvegardées' : 'Enregistrer les préférences'}
+      </button>
+    </div>
+  )
+}
+
 export const SettingsModal = ({ isOpen, onClose }) => {
+  const [settingsTab, setSettingsTab] = useState('keys')
   const [status, setStatus]     = useState({})
   const [keys, setKeys]         = useState({})
   const [show, setShow]         = useState({})
-  const [masked, setMasked]     = useState({})  // clé masquée récupérée du backend
+  const [masked, setMasked]     = useState({})
   const [saving, setSaving]     = useState({})
   const [deleting, setDeleting] = useState({})
   const [testing, setTesting]   = useState({})
@@ -369,6 +466,7 @@ export const SettingsModal = ({ isOpen, onClose }) => {
 
   useEffect(() => {
     if (isOpen) {
+      setSettingsTab('keys')
       setKeys({}); setShow({}); setMasked({}); setTestResults({}); setSavedMsg({})
       refresh()
     }
@@ -515,8 +613,26 @@ export const SettingsModal = ({ isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-lg w-full shadow-xl overflow-y-auto max-h-[90vh]">
-        <h2 className="text-2xl font-bold mb-1">Paramètres</h2>
+      <div className="bg-white rounded-lg max-w-lg w-full shadow-xl overflow-y-auto max-h-[90vh]">
+
+        {/* En-tête + onglets */}
+        <div className="px-6 pt-6 pb-0">
+          <h2 className="text-2xl font-bold mb-4">Paramètres</h2>
+          <div className="flex border-b border-gray-200 -mx-6 px-6">
+            {[['keys', 'Clés API'], ['prefs', 'Préférences']].map(([id, label]) => (
+              <button key={id} onClick={() => setSettingsTab(id)}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${
+                  settingsTab === id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-6">
+        {settingsTab === 'prefs' && <PreferencesTab />}
+        {settingsTab === 'keys' && <>
         <p className="text-sm text-gray-500 mb-5">
           Clés stockées dans votre base de données locale — elles ne quittent jamais votre machine.
         </p>
@@ -601,6 +717,8 @@ export const SettingsModal = ({ isOpen, onClose }) => {
         <button onClick={onClose} className="w-full py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">
           Fermer
         </button>
+        </>}
+        </div>
       </div>
     </div>
   )

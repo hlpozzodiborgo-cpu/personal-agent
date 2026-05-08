@@ -41,6 +41,21 @@ class AssetCRUD:
         """Récupère un actif par son symbole"""
         return db.query(Asset).filter(Asset.symbol == symbol).first()
 
+    @staticmethod
+    def delete(db: Session, symbol: str) -> bool:
+        """Supprime un actif et toutes ses positions/transactions associées."""
+        from models import Holding, Transaction
+        asset = db.query(Asset).filter(Asset.symbol == symbol).first()
+        if not asset:
+            return False
+        holdings = db.query(Holding).filter(Holding.asset_id == asset.id).all()
+        for h in holdings:
+            db.query(Transaction).filter(Transaction.holding_id == h.id).delete()
+            db.delete(h)
+        db.delete(asset)
+        db.commit()
+        return True
+
 
 # ============ HOLDINGS ============
 class HoldingCRUD:

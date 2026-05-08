@@ -618,6 +618,54 @@ export const PortfolioChart = () => {
   )
 }
 
+export const AssetsList = ({ assets, onDelete }) => {
+  if (!assets || assets.length === 0) return null
+
+  const TYPE_LABEL = { stock: 'Action', etf: 'ETF', crypto: 'Crypto', forex: 'Devise', bond: 'Obligation' }
+
+  const handleDelete = (symbol) => {
+    if (window.confirm(`Supprimer ${symbol} et toutes ses positions associées ?`)) {
+      onDelete(symbol)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-700">Actifs suivis ({assets.length})</h3>
+        <p className="text-xs text-gray-400">Supprimer un actif efface aussi toutes ses positions.</p>
+      </div>
+      <div className="divide-y divide-gray-50">
+        {assets.map(asset => (
+          <div key={asset.symbol} className="flex items-center justify-between px-6 py-3 hover:bg-gray-50">
+            <div className="flex items-center gap-3">
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                asset.asset_type === 'etf'    ? 'bg-blue-100 text-blue-700'   :
+                asset.asset_type === 'crypto' ? 'bg-orange-100 text-orange-700' :
+                'bg-gray-100 text-gray-600'
+              }`}>
+                {TYPE_LABEL[asset.asset_type] ?? asset.asset_type}
+              </span>
+              <div>
+                <span className="font-semibold text-gray-900 text-sm">{asset.symbol}</span>
+                <span className="text-xs text-gray-500 ml-2">{asset.name}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-sm font-medium text-gray-700">{formatCurrency(asset.current_price)}</span>
+              <button onClick={() => handleDelete(asset.symbol)}
+                className="text-gray-300 hover:text-red-500 transition text-lg leading-none"
+                title={`Supprimer ${asset.symbol}`}>
+                ×
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export const TopPerformers = ({ topGainer, topLoser }) => {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8">
