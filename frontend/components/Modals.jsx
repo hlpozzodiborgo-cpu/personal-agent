@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { addHolding, updateHolding, addAsset, searchAssets, getPriceAtDate, getSettings, updateFinnhubKey, updateAnthropicKey, updateNewsApiKey, deleteFinnhubKey, deleteAnthropicKey, deleteNewsApiKey, testFinnhubKey, testAnthropicKey, testNewsApiKey } from '@/lib/api'
+import { addHolding, updateHolding, addAsset, searchAssets, getPriceAtDate, getSettings, updateFinnhubKey, updateAnthropicKey, updateNewsApiKey, updateGeminiKey, updateGroqKey, deleteFinnhubKey, deleteAnthropicKey, deleteNewsApiKey, deleteGeminiKey, deleteGroqKey, testFinnhubKey, testAnthropicKey, testNewsApiKey, testGeminiKey, testGroqKey, setAiProvider, getMaskedKey } from '@/lib/api'
 
 export const AddAssetModal = ({ isOpen, onClose, onSuccess }) => {
   const [query, setQuery] = useState('')
@@ -348,13 +348,20 @@ export const AddHoldingModal = ({ isOpen, onClose, onSuccess, availableAssets })
   )
 }
 
+const AI_PROVIDERS = [
+  { id: 'claude',  label: 'Claude (Anthropic)', badge: '~0.001€/analyse',  free: false },
+  { id: 'gemini',  label: 'Gemini 1.5 Flash',   badge: '1M tokens/jour',   free: true  },
+  { id: 'groq',    label: 'Llama 3.1 70B (Groq)',badge: '14 400 req/jour',  free: true  },
+]
+
 export const SettingsModal = ({ isOpen, onClose }) => {
-  const [status, setStatus] = useState({ finnhub_configured: false, anthropic_configured: false, newsapi_configured: false })
-  const [keys, setKeys]         = useState({ finnhub: '', anthropic: '', newsapi: '' })
-  const [show, setShow]         = useState({ finnhub: false, anthropic: false, newsapi: false })
-  const [saving, setSaving]     = useState({ finnhub: false, anthropic: false, newsapi: false })
-  const [deleting, setDeleting] = useState({ finnhub: false, anthropic: false, newsapi: false })
-  const [testing, setTesting]   = useState({ finnhub: false, anthropic: false, newsapi: false })
+  const [status, setStatus]     = useState({})
+  const [keys, setKeys]         = useState({})
+  const [show, setShow]         = useState({})
+  const [masked, setMasked]     = useState({})  // clé masquée récupérée du backend
+  const [saving, setSaving]     = useState({})
+  const [deleting, setDeleting] = useState({})
+  const [testing, setTesting]   = useState({})
   const [testResults, setTestResults] = useState({})
   const [savedMsg, setSavedMsg] = useState({})
 
@@ -362,21 +369,34 @@ export const SettingsModal = ({ isOpen, onClose }) => {
 
   useEffect(() => {
     if (isOpen) {
-      setKeys({ finnhub: '', anthropic: '', newsapi: '' })
-      setShow({ finnhub: false, anthropic: false, newsapi: false })
-      setTestResults({}); setSavedMsg({})
+      setKeys({}); setShow({}); setMasked({}); setTestResults({}); setSavedMsg({})
       refresh()
     }
   }, [isOpen])
 
+  const handleReveal = async (id, dbKey) => {
+    if (show[id]) {
+      // Cacher : réinitialiser
+      setShow(s => ({ ...s, [id]: false }))
+      setMasked(m => ({ ...m, [id]: null }))
+      return
+    }
+    try {
+      const res = await getMaskedKey(dbKey)
+      setMasked(m => ({ ...m, [id]: res.data.masked }))
+      setShow(s => ({ ...s, [id]: true }))
+    } catch {}
+  }
+
   const handleSave = async (id, updateFn) => {
-    const val = keys[id].trim()
+    const val = keys[id]?.trim()
     if (!val) return
     setSaving(s => ({ ...s, [id]: true }))
     try {
       await updateFn(val)
       await refresh()
       setKeys(k => ({ ...k, [id]: '' }))
+      setMasked(m => ({ ...m, [id]: null })); setShow(s => ({ ...s, [id]: false }))
       setSavedMsg(m => ({ ...m, [id]: 'Clé sauvegardée.' }))
       setTimeout(() => setSavedMsg(m => ({ ...m, [id]: '' })), 3000)
     } catch { setSavedMsg(m => ({ ...m, [id]: 'Erreur lors de la sauvegarde.' })) }
@@ -386,97 +406,110 @@ export const SettingsModal = ({ isOpen, onClose }) => {
   const handleDelete = async (id, deleteFn) => {
     if (!window.confirm('Supprimer cette clé API ?')) return
     setDeleting(d => ({ ...d, [id]: true }))
-    try { await deleteFn(); await refresh() }
+    try { await deleteFn(); await refresh(); setMasked(m => ({ ...m, [id]: null })) }
     catch {}
     finally { setDeleting(d => ({ ...d, [id]: false })) }
   }
 
   const handleTest = async (id, testFn) => {
-    setTesting(t => ({ ...t, [id]: true }))
-    setTestResults(r => ({ ...r, [id]: null }))
-    try {
-      const res = await testFn()
-      setTestResults(r => ({ ...r, [id]: res.data }))
-    } catch {
-      setTestResults(r => ({ ...r, [id]: { success: false, message: 'Erreur réseau.' } }))
-    } finally { setTesting(t => ({ ...t, [id]: false })) }
+    setTesting(t => ({ ...t, [id]: true })); setTestResults(r => ({ ...r, [id]: null }))
+    try { const res = await testFn(); setTestResults(r => ({ ...r, [id]: res.data })) }
+    catch { setTestResults(r => ({ ...r, [id]: { success: false, message: 'Erreur réseau.' } })) }
+    finally { setTesting(t => ({ ...t, [id]: false })) }
+  }
+
+  const handleProviderChange = async (p) => {
+    try { await setAiProvider(p); await refresh() } catch {}
   }
 
   if (!isOpen) return null
 
-  const KeySection = ({ id, title, description, link, linkText, isConfigured, updateFn, deleteFn, testFn }) => (
-    <div className="border rounded-lg p-4 mb-4">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{title}</p>
-        <div className={`flex items-center gap-1.5 text-xs font-medium ${isConfigured ? 'text-green-600' : 'text-gray-400'}`}>
-          <span className={`w-2 h-2 rounded-full ${isConfigured ? 'bg-green-500' : 'bg-gray-300'}`} />
-          {isConfigured ? 'Configurée' : 'Non configurée'}
-        </div>
-      </div>
-      {description && <p className="text-xs text-gray-400 mb-3">{description}</p>}
+  // Composant champ clé API réutilisable
+  const KeyField = ({ id, dbKey, isConfigured, updateFn, deleteFn, testFn, link, linkText }) => {
+    const inputVal = keys[id] ?? ''
+    const isTyping = inputVal.length > 0
+    // Si on a une clé masquée ET show activé ET pas en train de taper → afficher masqué en readonly
+    const displayVal = (!isTyping && show[id] && masked[id]) ? masked[id] : inputVal
+    const inputType  = (show[id] && !(!isTyping && masked[id])) ? 'text' : 'password'
 
-      {/* Champ de saisie */}
-      <div className="flex gap-2 mb-2">
-        <div className="relative flex-1">
-          <input
-            type={show[id] ? 'text' : 'password'}
-            placeholder={isConfigured ? '••••••••• (remplacer)' : 'Collez votre clé ici'}
-            value={keys[id]}
-            onChange={e => setKeys(k => ({ ...k, [id]: e.target.value }))}
-            className="w-full px-3 py-2 pr-16 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-          />
-          {/* Fix Voir/Cacher : onMouseDown preventDefault empêche le blur avant le click */}
-          <button
-            type="button"
-            onMouseDown={e => e.preventDefault()}
-            onClick={() => setShow(s => ({ ...s, [id]: !s[id] }))}
-            className="absolute right-2 top-2 text-xs text-gray-400 hover:text-gray-700 px-1 py-0.5 rounded"
-          >
-            {show[id] ? 'Cacher' : 'Voir'}
+    return (
+      <div>
+        <div className="flex gap-2 mb-2">
+          <div className="relative flex-1">
+            <input
+              type={inputType}
+              readOnly={!isTyping && show[id] && !!masked[id]}
+              placeholder={isConfigured ? '••••••••• (remplacer)' : 'Collez votre clé ici'}
+              value={displayVal}
+              onChange={e => {
+                if (!(!isTyping && show[id] && masked[id])) // ignore si readonly masqué
+                  setKeys(k => ({ ...k, [id]: e.target.value }))
+              }}
+              className={`w-full px-3 py-2 pr-16 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 ${
+                !isTyping && show[id] && masked[id] ? 'border-gray-200 bg-gray-50 font-mono text-gray-600' : 'border-gray-300'
+              }`}
+            />
+            <button
+              type="button"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => {
+                if (isConfigured && !isTyping) {
+                  handleReveal(id, dbKey)
+                } else {
+                  setShow(s => ({ ...s, [id]: !s[id] }))
+                }
+              }}
+              className="absolute right-2 top-2 text-xs text-gray-400 hover:text-gray-700 px-1 py-0.5 rounded select-none"
+            >
+              {show[id] ? 'Cacher' : (isConfigured && !isTyping ? 'Voir' : 'Voir')}
+            </button>
+          </div>
+          <button onClick={() => handleSave(id, updateFn)} disabled={!isTyping || saving[id]}
+            className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 text-sm font-medium whitespace-nowrap">
+            {saving[id] ? '…' : 'Sauvegarder'}
           </button>
         </div>
-        <button onClick={() => handleSave(id, updateFn)}
-          disabled={!keys[id].trim() || saving[id]}
-          className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 text-sm font-medium whitespace-nowrap">
-          {saving[id] ? '…' : 'Sauvegarder'}
-        </button>
-      </div>
 
-      {savedMsg[id] && (
-        <p className={`text-xs mb-2 ${savedMsg[id].includes('Erreur') ? 'text-red-600' : 'text-green-600'}`}>
-          {savedMsg[id]}
-        </p>
-      )}
+        {savedMsg[id] && (
+          <p className={`text-xs mb-2 ${savedMsg[id].includes('Erreur') ? 'text-red-600' : 'text-green-600'}`}>
+            {savedMsg[id]}
+          </p>
+        )}
 
-      {/* Actions : test + supprimer */}
-      <div className="flex gap-2">
-        {testFn && (
-          <button onClick={() => handleTest(id, testFn)}
-            disabled={testing[id] || !isConfigured}
-            className="flex-1 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40">
-            {testing[id] ? 'Test…' : '🔌 Tester la connexion'}
-          </button>
-        )}
-        {link && (
-          <a href={link} target="_blank" rel="noreferrer"
-            className="flex-1 py-1.5 text-center border border-gray-200 rounded-lg text-xs text-blue-600 hover:bg-blue-50">
-            {linkText} →
-          </a>
-        )}
-        {isConfigured && deleteFn && (
-          <button onClick={() => handleDelete(id, deleteFn)}
-            disabled={deleting[id]}
-            className="py-1.5 px-3 border border-red-200 rounded-lg text-xs text-red-500 hover:bg-red-50 disabled:opacity-40">
-            {deleting[id] ? '…' : '🗑'}
-          </button>
-        )}
-      </div>
-
-      {testResults[id] && (
-        <div className={`mt-2 p-2 rounded text-xs ${testResults[id].success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-          {testResults[id].success ? '✓ ' : '✗ '}{testResults[id].message}
+        <div className="flex gap-2">
+          {testFn && (
+            <button onClick={() => handleTest(id, testFn)} disabled={testing[id] || !isConfigured}
+              className="flex-1 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40">
+              {testing[id] ? 'Test…' : '🔌 Tester'}
+            </button>
+          )}
+          {link && (
+            <a href={link} target="_blank" rel="noreferrer"
+              className="flex-1 py-1.5 text-center border border-gray-200 rounded-lg text-xs text-blue-600 hover:bg-blue-50">
+              {linkText} →
+            </a>
+          )}
+          {isConfigured && deleteFn && (
+            <button onClick={() => handleDelete(id, deleteFn)} disabled={deleting[id]}
+              className="py-1.5 px-3 border border-red-200 rounded-lg text-xs text-red-500 hover:bg-red-50 disabled:opacity-40">
+              {deleting[id] ? '…' : '🗑'}
+            </button>
+          )}
         </div>
-      )}
+
+        {testResults[id] && (
+          <div className={`mt-2 p-2 rounded text-xs ${testResults[id].success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+            {testResults[id].success ? '✓ ' : '✗ '}{testResults[id].message}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const Badge = ({ isConfigured }) => (
+    <div className={`flex items-center gap-1.5 text-xs font-medium ${isConfigured ? 'text-green-600' : 'text-gray-400'}`}>
+      <span className={`w-2 h-2 rounded-full ${isConfigured ? 'bg-green-500' : 'bg-gray-300'}`} />
+      {isConfigured ? 'Configurée' : 'Non configurée'}
     </div>
   )
 
@@ -488,21 +521,82 @@ export const SettingsModal = ({ isOpen, onClose }) => {
           Clés stockées dans votre base de données locale — elles ne quittent jamais votre machine.
         </p>
 
-        <KeySection id="finnhub" title="Prix des actifs" isConfigured={status.finnhub_configured}
-          link="https://finnhub.io" linkText="Clé gratuite"
-          updateFn={updateFinnhubKey} deleteFn={deleteFinnhubKey} testFn={testFinnhubKey} />
+        {/* Prix des actifs */}
+        <div className="border rounded-lg p-4 mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Prix des actifs</p>
+            <Badge isConfigured={status.finnhub_configured} />
+          </div>
+          <KeyField id="finnhub" dbKey="finnhub_api_key" isConfigured={status.finnhub_configured}
+            updateFn={updateFinnhubKey} deleteFn={deleteFinnhubKey} testFn={testFinnhubKey}
+            link="https://finnhub.io" linkText="Clé gratuite" />
+        </div>
 
-        <KeySection id="anthropic" title="Analyse IA (Claude)"
-          description="Analyse les actualités et génère des recommandations en français. Modèle : claude-haiku (~0.001 €/analyse). $5 de crédits offerts à l'inscription."
-          isConfigured={status.anthropic_configured}
-          link="https://console.anthropic.com" linkText="console.anthropic.com"
-          updateFn={updateAnthropicKey} deleteFn={deleteAnthropicKey} testFn={testAnthropicKey} />
+        {/* Fournisseur IA */}
+        <div className="border rounded-lg p-4 mb-4">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Fournisseur IA — Analyse des actualités</p>
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            {AI_PROVIDERS.map(p => (
+              <button key={p.id} onClick={() => handleProviderChange(p.id)}
+                className={`p-2.5 rounded-lg border text-left transition ${
+                  status.ai_provider === p.id
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                }`}>
+                <div className="flex items-center gap-1 mb-1">
+                  {status.ai_provider === p.id && <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />}
+                  {p.free && <span className="text-xs bg-green-100 text-green-700 px-1 rounded font-medium">GRATUIT</span>}
+                </div>
+                <p className="text-xs font-medium text-gray-800 leading-tight">{p.label}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{p.badge}</p>
+              </button>
+            ))}
+          </div>
 
-        <KeySection id="newsapi" title="Actualités (NewsAPI)"
-          description="Gratuit jusqu'à 100 requêtes/jour. Recherche par nom d'actif → couvre les ETF européens."
-          isConfigured={status.newsapi_configured}
-          link="https://newsapi.org/register" linkText="Clé gratuite"
-          updateFn={updateNewsApiKey} deleteFn={deleteNewsApiKey} testFn={testNewsApiKey} />
+          {/* Clé du fournisseur actif */}
+          {status.ai_provider === 'claude' && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-gray-600">Clé Anthropic <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">console.anthropic.com →</a></p>
+                <Badge isConfigured={status.anthropic_configured} />
+              </div>
+              <KeyField id="anthropic" dbKey="anthropic_api_key" isConfigured={status.anthropic_configured}
+                updateFn={updateAnthropicKey} deleteFn={deleteAnthropicKey} testFn={testAnthropicKey} />
+            </div>
+          )}
+          {status.ai_provider === 'gemini' && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-gray-600">Clé Google Gemini <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">aistudio.google.com →</a></p>
+                <Badge isConfigured={status.gemini_configured} />
+              </div>
+              <KeyField id="gemini" dbKey="gemini_api_key" isConfigured={status.gemini_configured}
+                updateFn={updateGeminiKey} deleteFn={deleteGeminiKey} testFn={testGeminiKey} />
+            </div>
+          )}
+          {status.ai_provider === 'groq' && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-gray-600">Clé Groq <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">console.groq.com →</a></p>
+                <Badge isConfigured={status.groq_configured} />
+              </div>
+              <KeyField id="groq" dbKey="groq_api_key" isConfigured={status.groq_configured}
+                updateFn={updateGroqKey} deleteFn={deleteGroqKey} testFn={testGroqKey} />
+            </div>
+          )}
+        </div>
+
+        {/* Actualités */}
+        <div className="border rounded-lg p-4 mb-5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Actualités (NewsAPI)</p>
+            <Badge isConfigured={status.newsapi_configured} />
+          </div>
+          <p className="text-xs text-gray-400 mb-3">Gratuit jusqu'à 100 req/jour. Couvre les ETF européens par recherche de nom.</p>
+          <KeyField id="newsapi" dbKey="newsapi_key" isConfigured={status.newsapi_configured}
+            updateFn={updateNewsApiKey} deleteFn={deleteNewsApiKey} testFn={testNewsApiKey}
+            link="https://newsapi.org/register" linkText="Clé gratuite" />
+        </div>
 
         <button onClick={onClose} className="w-full py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">
           Fermer

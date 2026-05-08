@@ -61,9 +61,17 @@ export const updateNewsApiKey   = (key) => api.put('/api/settings/newsapi-key', 
 export const deleteFinnhubKey   = ()    => api.delete('/api/settings/finnhub-key')
 export const deleteAnthropicKey = ()    => api.delete('/api/settings/anthropic-key')
 export const deleteNewsApiKey   = ()    => api.delete('/api/settings/newsapi-key')
+export const deleteGeminiKey    = ()    => api.delete('/api/settings/gemini-key')
+export const deleteGroqKey      = ()    => api.delete('/api/settings/groq-key')
 export const testFinnhubKey     = ()    => api.get('/api/settings/test-finnhub')
 export const testAnthropicKey   = ()    => api.get('/api/settings/test-anthropic')
 export const testNewsApiKey     = ()    => api.get('/api/settings/test-newsapi')
+export const testGeminiKey      = ()    => api.get('/api/settings/test-gemini')
+export const testGroqKey        = ()    => api.get('/api/settings/test-groq')
+export const updateGeminiKey    = (key) => api.put('/api/settings/gemini-key',   null, { params: { key } })
+export const updateGroqKey      = (key) => api.put('/api/settings/groq-key',     null, { params: { key } })
+export const setAiProvider      = (p)   => api.put('/api/settings/ai-provider',  null, { params: { provider: p } })
+export const getMaskedKey       = (name) => api.get(`/api/settings/masked-key/${name}`)
 
 // ============ NEWS & IA ============
 export const analyzePortfolioNews = (days = 3) =>
