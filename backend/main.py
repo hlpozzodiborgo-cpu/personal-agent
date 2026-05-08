@@ -46,6 +46,9 @@ try:
         ("finnhub_api_key",   FinanceService.set_finnhub_key),
         ("anthropic_api_key", AIService.set_api_key),
         ("newsapi_key",       NewsService.set_api_key),
+        ("gemini_api_key",    AIService.set_gemini_key),
+        ("groq_api_key",      AIService.set_groq_key),
+        ("ai_provider",       AIService.set_provider),
     ]:
         _s = _startup_db.query(AppSetting).filter(AppSetting.key == _key).first()
         if _s and _s.value:
@@ -604,6 +607,9 @@ async def get_settings():
         "finnhub_configured":   _is_real_key(FinanceService.get_finnhub_key()),
         "anthropic_configured": _is_real_key(AIService.get_api_key()),
         "newsapi_configured":   _is_real_key(NewsService.get_api_key()),
+        "gemini_configured":    _is_real_key(AIService.get_gemini_key()),
+        "groq_configured":      _is_real_key(AIService.get_groq_key()),
+        "ai_provider":          AIService.get_provider(),
     }
 
 
@@ -664,6 +670,64 @@ async def test_anthropic_key():
         return {"success": True, "message": f"Claude connecte ({resp.model.split('-')[1]})"}
     except Exception as e:
         return {"success": False, "message": str(e)[:120]}
+
+@app.get("/api/settings/masked-key/{key_name}", tags=["Settings"])
+async def get_masked_key(key_name: str, db: Session = Depends(get_db)):
+    """Retourne les premiers et derniers caracteres d'une cle sauvegardee."""
+    allowed = {"finnhub_api_key", "anthropic_api_key", "newsapi_key", "gemini_api_key", "groq_api_key"}
+    if key_name not in allowed:
+        raise HTTPException(status_code=400, detail="Cle inconnue")
+    s = db.query(AppSetting).filter(AppSetting.key == key_name).first()
+    if not s or not s.value or not _is_real_key(s.value):
+        return {"masked": None}
+    v = s.value
+    masked = (v[:6] + "..." + v[-4:]) if len(v) > 10 else "****"
+    return {"masked": masked}
+
+
+@app.put("/api/settings/ai-provider", tags=["Settings"])
+async def set_ai_provider(provider: str, db: Session = Depends(get_db)):
+    if provider not in {"claude", "gemini", "groq"}:
+        raise HTTPException(status_code=400, detail="Fournisseur invalide")
+    _save_setting(db, "ai_provider", provider)
+    AIService.set_provider(provider)
+    return {"success": True, "provider": provider}
+
+
+@app.put("/api/settings/gemini-key", tags=["Settings"])
+async def update_gemini_key(key: str, db: Session = Depends(get_db)):
+    _save_setting(db, "gemini_api_key", key)
+    AIService.set_gemini_key(key)
+    return {"success": True}
+
+@app.delete("/api/settings/gemini-key", tags=["Settings"])
+async def delete_gemini_key(db: Session = Depends(get_db)):
+    _delete_setting(db, "gemini_api_key", AIService.set_gemini_key)
+    return {"success": True}
+
+
+@app.put("/api/settings/groq-key", tags=["Settings"])
+async def update_groq_key(key: str, db: Session = Depends(get_db)):
+    _save_setting(db, "groq_api_key", key)
+    AIService.set_groq_key(key)
+    return {"success": True}
+
+@app.delete("/api/settings/groq-key", tags=["Settings"])
+async def delete_groq_key(db: Session = Depends(get_db)):
+    _delete_setting(db, "groq_api_key", AIService.set_groq_key)
+    return {"success": True}
+
+
+@app.get("/api/settings/test-gemini", tags=["Settings"])
+async def test_gemini_key():
+    result = AIService.test_gemini()
+    return result
+
+@app.get("/api/settings/test-groq", tags=["Settings"])
+async def test_groq_key():
+    result = AIService.test_groq()
+    return result
+
 
 @app.get("/api/settings/test-newsapi", tags=["Settings"])
 async def test_newsapi_key():
