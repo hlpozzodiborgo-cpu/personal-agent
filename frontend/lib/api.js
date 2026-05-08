@@ -10,7 +10,8 @@ const api = axios.create({
 })
 
 // ============ ASSETS ============
-export const getAssets = () => api.get('/api/assets')
+export const getAssets     = ()       => api.get('/api/assets')
+export const deleteAsset   = (symbol) => api.delete(`/api/assets/${symbol}`)
 
 export const addAsset = (symbol, name, assetType = 'stock') => 
   api.post('/api/assets/add', null, {
@@ -72,6 +73,9 @@ export const updateGeminiKey    = (key) => api.put('/api/settings/gemini-key',  
 export const updateGroqKey      = (key) => api.put('/api/settings/groq-key',     null, { params: { key } })
 export const setAiProvider      = (p)   => api.put('/api/settings/ai-provider',  null, { params: { provider: p } })
 export const getMaskedKey       = (name) => api.get(`/api/settings/masked-key/${name}`)
+export const getPreferences     = ()     => api.get('/api/settings/preferences')
+export const updatePreferences  = (horizon, risk) =>
+  api.put('/api/settings/preferences', null, { params: { investment_horizon: horizon, risk_appetite: risk } })
 
 // ============ NEWS & IA ============
 export const analyzePortfolioNews = (days = 3) =>

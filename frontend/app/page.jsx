@@ -1,8 +1,8 @@
 'use client'
 
 import React, { useEffect, useState, useRef } from 'react'
-import { getPortfolio, getAssets, checkHealth, removeHolding } from '@/lib/api'
-import { PortfolioSummary, HoldingsList, ConsolidatedView, PortfolioChart, TopPerformers } from '@/components/PortfolioComponents'
+import { getPortfolio, getAssets, checkHealth, removeHolding, deleteAsset } from '@/lib/api'
+import { PortfolioSummary, HoldingsList, ConsolidatedView, PortfolioChart, TopPerformers, AssetsList } from '@/components/PortfolioComponents'
 import { AddAssetModal, AddHoldingModal, EditHoldingModal, SettingsModal } from '@/components/Modals'
 import NewsRecommendations from '@/components/NewsRecommendations'
 
@@ -65,8 +65,18 @@ export default function Home() {
     { id: 'evolution',    label: 'Évolution' },
     { id: 'consolidated', label: 'Par titre' },
     { id: 'positions',    label: 'Ordres passés' },
+    { id: 'assets',       label: 'Actifs suivis' },
     { id: 'news',         label: '✨ Actualités & IA' },
   ]
+
+  const handleDeleteAsset = async (symbol) => {
+    try {
+      await deleteAsset(symbol)
+      await loadData()
+    } catch (err) {
+      setError(`Erreur lors de la suppression de ${symbol} : ${err.message}`)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -156,6 +166,9 @@ export default function Home() {
               <div className={activeTab !== 'consolidated' ? 'hidden' : ''}><ConsolidatedView holdings={portfolio.holdings} /></div>
               <div className={activeTab !== 'positions'    ? 'hidden' : ''}>
                 <HoldingsList holdings={portfolio.holdings} onDelete={handleDeleteHolding} onEdit={setEditingHolding} />
+              </div>
+              <div className={activeTab !== 'assets'        ? 'hidden' : ''}>
+                <AssetsList assets={assets} onDelete={handleDeleteAsset} />
               </div>
               <div className={activeTab !== 'news'         ? 'hidden' : ''}><NewsRecommendations /></div>
             </div>
