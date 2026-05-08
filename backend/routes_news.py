@@ -11,8 +11,11 @@ Flux :
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 import logging
 
+from config import DATABASE_URL
 from crud import HoldingCRUD
 from finance_service import FinanceService
 from news_service import NewsService
@@ -21,10 +24,11 @@ from ai_service import AIService
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/news", tags=["News & AI"])
 
+_engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
+_Session = sessionmaker(bind=_engine)
 
 def get_db():
-    from main import SessionLocal
-    db = SessionLocal()
+    db = _Session()
     try:
         yield db
     finally:

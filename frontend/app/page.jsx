@@ -183,7 +183,7 @@ export default function Home() {
 
       <footer className="bg-white border-t border-gray-200 mt-12 py-6">
         <div className="max-w-7xl mx-auto px-4 text-center text-gray-600 text-sm">
-          <p>💡 Phase 1 en place : Dashboard de suivi. Phase 2 : Actualités & Recommandations IA à venir</p>
+          <p>💰 Investor AI — Suivi de portefeuille · Graphiques · Analyse IA des actualités</p>
         </div>
       </footer>
     </div>
