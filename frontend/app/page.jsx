@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react'
 import { getPortfolio, getAssets, checkHealth, removeHolding } from '@/lib/api'
 import { PortfolioSummary, HoldingsList, TopPerformers } from '@/components/PortfolioComponents'
 import { AddAssetModal, AddHoldingModal, SettingsModal } from '@/components/Modals'
+import NewsRecommendations from '@/components/NewsRecommendations'
 
 export default function Home() {
   const [portfolio, setPortfolio] = useState(null)
@@ -128,6 +129,12 @@ export default function Home() {
               <HoldingsList holdings={portfolio.holdings} onDelete={handleDeleteHolding} />
             </div>
             <TopPerformers topGainer={portfolio.top_gainer} topLoser={portfolio.top_loser} />
+            {/* Phase 2: News & Recommendations */}
+            <div className="mt-12 mb-8">
+              <NewsRecommendations 
+                symbols={portfolio.holdings?.map(h => h.symbol) || []}
+              />
+            </div>
           </>
         )}
 

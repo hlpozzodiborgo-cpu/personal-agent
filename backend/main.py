@@ -9,6 +9,10 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 import logging
 
+# ============ CONFIGURATION ============
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 from config import DATABASE_URL, DEBUG
 from models import Base, Asset as AssetModel, Transaction as TransactionModel, AppSetting
 from schemas import (
@@ -17,10 +21,13 @@ from schemas import (
 )
 from crud import AssetCRUD, HoldingCRUD
 from finance_service import FinanceService
-
-# ============ CONFIGURATION ============
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Phase 2: News & Recommendations
+try:
+    from routes_news import router as news_router
+    logger.info("✅ Routes news & recommandations disponibles")
+except ImportError as e:
+    logger.warning(f"⚠️ Routes news non disponibles (routes_news.py): {e}")
+    news_router = None
 
 # Database
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
@@ -386,6 +393,12 @@ async def test_finnhub_key():
     if price:
         return {"success": True, "message": f"Cle valide — AAPL: ${price:.2f}"}
     return {"success": False, "message": "Cle invalide ou limite atteinte"}
+
+
+# ============ PHASE 2 - NEWS & RECOMMENDATIONS ============
+if news_router:
+    app.include_router(news_router)
+    logger.info("✅ Routes news & recommandations chargées")
 
 
 # ============ ROOT ============
