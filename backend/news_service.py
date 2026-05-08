@@ -1,6 +1,10 @@
 """
-Service pour récupérer et gérer les actualités financières via Finnhub
-Phase 2: Suivi des actualités et recommandations
+Service de récupération des actualités via NewsAPI.
+
+NewsAPI (newsapi.org) :
+- Gratuit jusqu'à 100 requêtes/jour (largement suffisant en usage personnel)
+- Recherche par nom de société → fonctionne pour les ETF européens
+- Clé à obtenir sur newsapi.org et à configurer dans Paramètres
 """
 import requests
 import logging
@@ -9,139 +13,118 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-FINNHUB_BASE_URL = "https://finnhub.io/api/v1"
+_newsapi_key_override: Optional[str] = None
 
 
 class NewsService:
-    """Service pour récupérer les actualités des actifs"""
 
     @staticmethod
-    def get_news_for_symbol(symbol: str, api_key: str) -> List[Dict]:
+    def get_api_key() -> Optional[str]:
+        global _newsapi_key_override
+        if _newsapi_key_override:
+            return _newsapi_key_override
+        from config import NEWSAPI_KEY
+        return NEWSAPI_KEY
+
+    @staticmethod
+    def set_api_key(key: str) -> None:
+        global _newsapi_key_override
+        _newsapi_key_override = key or None
+
+    @staticmethod
+    def get_news_for_portfolio(
+        symbols: List[str],
+        names: List[str],
+        days: int = 3,
+    ) -> List[Dict]:
         """
-        Récupère les actualités pour un symbole donné via Finnhub
-        
-        Args:
-            symbol: Le symbole de l'actif (ex: AAPL)
-            api_key: Clé API Finnhub
-            
-        Returns:
-            Liste des actualités avec détails
+        Récupère les actualités récentes pour le portefeuille.
+
+        Recherche par nom d'actif (plus fiable que le symbole pour les ETF EU).
+        Fusionne et déduplique les articles, retourne les 20 plus récents.
         """
+        api_key = NewsService.get_api_key()
         if not api_key:
-            logger.warning("❌ FINNHUB_API_KEY non configurée - impossible de récupérer les actualités")
+            logger.warning("Clé NewsAPI absente — configurez-la dans Paramètres.")
             return []
-        
+
+        # Construire des termes de recherche à partir des noms
+        # Ex: "iShares MSCI World Swap PEA UCITS ETF" → "iShares MSCI World"
+        queries = []
+        for name in names:
+            # Garder les 3 premiers mots significatifs
+            words = [w for w in name.split() if len(w) > 2 and w.upper() != w][:3]
+            if words:
+                queries.append(" ".join(words))
+
+        # Ajouter les symboles US courts (sans suffixe de place boursière)
+        for symbol in symbols:
+            root = symbol.split(".")[0]
+            if len(root) <= 5 and root not in [q.split()[0] for q in queries]:
+                queries.append(root)
+
+        # Dédupliquer et limiter les requêtes
+        queries = list(dict.fromkeys(queries))[:6]
+
+        all_articles: List[Dict] = []
+        for query in queries:
+            articles = NewsService._search(query, api_key, days)
+            all_articles.extend(articles)
+
+        # Dédupliquer par titre
+        seen: set = set()
+        unique: List[Dict] = []
+        for a in all_articles:
+            key = a["title"].lower().strip()
+            if key not in seen:
+                seen.add(key)
+                unique.append(a)
+
+        # Trier du plus récent au plus ancien, garder 20 max
+        unique.sort(key=lambda x: x.get("date", ""), reverse=True)
+        logger.info(f"NewsAPI: {len(unique)} articles pour {len(queries)} requêtes")
+        return unique[:20]
+
+    @staticmethod
+    def _search(query: str, api_key: str, days: int = 3) -> List[Dict]:
+        """Appel NewsAPI Everything endpoint."""
         try:
-            logger.info(f"📰 Récupération des actualités pour {symbol}...")
-            
+            from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
             r = requests.get(
-                f"{FINNHUB_BASE_URL}/news",
+                "https://newsapi.org/v2/everything",
                 params={
-                    "symbol": symbol,
-                    "token": api_key,
-                    "minId": 0  # Récupérer les actualités récentes
+                    "q": query,
+                    "sortBy": "publishedAt",
+                    "language": "en",
+                    "from": from_date,
+                    "pageSize": 5,
+                    "apiKey": api_key,
                 },
-                timeout=10
+                headers={"User-Agent": "InvestorAI/1.0"},
+                timeout=8,
             )
-            
+            if r.status_code == 401:
+                logger.error("Clé NewsAPI invalide.")
+                return []
             if r.status_code == 429:
-                logger.warning(f"⚠️ Finnhub rate limit atteint pour {symbol}")
+                logger.warning("NewsAPI rate limit atteint.")
                 return []
-            
             if r.status_code != 200:
-                logger.warning(f"⚠️ Erreur Finnhub {r.status_code} pour {symbol}")
+                logger.warning(f"NewsAPI {r.status_code} pour '{query}'")
                 return []
-            
-            news_list = r.json()
-            logger.info(f"✅ {len(news_list)} actualités trouvées pour {symbol}")
-            return news_list
-            
-        except requests.Timeout:
-            logger.warning(f"⏱️ Timeout Finnhub pour {symbol}")
-            return []
+
+            return [
+                {
+                    "title": a["title"],
+                    "description": a.get("description") or "",
+                    "source": a["source"]["name"],
+                    "url": a["url"],
+                    "date": a["publishedAt"][:10],
+                    "query": query,
+                }
+                for a in r.json().get("articles", [])
+                if a.get("title") and a["title"] != "[Removed]"
+            ]
         except Exception as e:
-            logger.error(f"❌ Erreur récupération actualités {symbol}: {e}")
+            logger.error(f"NewsAPI error pour '{query}': {e}")
             return []
-
-    @staticmethod
-    def get_news_for_portfolio(symbols: List[str], api_key: str) -> List[Dict]:
-        """
-        Récupère les actualités pour tous les symboles du portefeuille
-        
-        Args:
-            symbols: Liste des symboles du portefeuille
-            api_key: Clé API Finnhub
-            
-        Returns:
-            Liste combinée des actualités triées par date
-        """
-        import time
-        all_news = []
-        
-        for i, symbol in enumerate(symbols):
-            news = NewsService.get_news_for_symbol(symbol, api_key)
-            
-            # Ajouter le symbole associé à chaque actualité
-            for article in news:
-                article['symbol'] = symbol
-                all_news.append(article)
-            
-            # Petit délai entre les requêtes pour éviter rate limit
-            if i < len(symbols) - 1:
-                time.sleep(0.1)
-        
-        logger.info(f"📰 Total: {len(all_news)} actualités trouvées pour {len(symbols)} symboles")
-        
-        # Trier par date décroissante (plus récent en premier)
-        all_news.sort(
-            key=lambda x: x.get('datetime', 0),
-            reverse=True
-        )
-        
-        return all_news
-
-    @staticmethod
-    def filter_recent_news(news_list: List[Dict], hours: int = 24) -> List[Dict]:
-        """
-        Filtre les actualités pour ne garder que les récentes
-        
-        Args:
-            news_list: Liste des actualités
-            hours: Nombre d'heures à considérer (par défaut 24h)
-            
-        Returns:
-            Liste filtrée des actualités récentes
-        """
-        now = datetime.now().timestamp()
-        cutoff = now - (hours * 3600)
-        
-        return [
-            article for article in news_list
-            if article.get('datetime', 0) >= cutoff
-        ]
-
-    @staticmethod
-    def get_article_details(article: Dict) -> Dict:
-        """
-        Extrait les informations pertinentes d'un article
-        
-        Args:
-            article: Données brutes de l'article depuis Finnhub
-            
-        Returns:
-            Dictionnaire avec les informations formatées
-        """
-        timestamp = article.get('datetime', 0)
-        date_time = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-        
-        return {
-            'symbol': article.get('symbol', ''),
-            'title': article.get('headline', ''),
-            'summary': article.get('summary', ''),
-            'url': article.get('url', ''),
-            'source': article.get('source', 'Unknown'),
-            'published_at': date_time,
-            'timestamp': timestamp,
-            'image': article.get('image', None),
-            'related': article.get('related', [])
-        }

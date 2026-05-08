@@ -1,230 +1,105 @@
 """
-Routes pour les actualités et recommandations
-Phase 2: News & Recommendations endpoints
+Routes Phase 2 : Actualités & Recommandations IA
+
+Flux :
+  1. Le frontend déclenche GET /api/news/analyze
+  2. On lit le portefeuille actif depuis la DB
+  3. On récupère les actualités via NewsAPI (par nom d'actif)
+  4. On envoie les articles + le contexte du portefeuille à Claude
+  5. Claude retourne une analyse structurée en JSON
+  6. On renvoie le résultat au frontend
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
-from datetime import datetime
 import logging
 
-from config import FINNHUB_API_KEY
+from crud import HoldingCRUD
+from finance_service import FinanceService
 from news_service import NewsService
-from recommendation_engine import RecommendationEngine
-from schemas_news import Recommendation, RecommendationResponse, EmailNotificationRequest
-from email_service import EmailService
+from ai_service import AIService
 
 logger = logging.getLogger(__name__)
-
-# Créer le routeur
-router = APIRouter(prefix="/api/news", tags=["News & Recommendations"])
+router = APIRouter(prefix="/api/news", tags=["News & AI"])
 
 
-@router.get("/recommendations", response_model=RecommendationResponse)
-async def get_recommendations(
-    symbols: str = None,  # Symboles séparés par virgules (ex: "AAPL,MSFT")
-    hours: int = 24,  # Considérer les actualités des dernières X heures
-) -> RecommendationResponse:
-    """
-    Récupère les recommandations basées sur les actualités récentes
-    
-    Query parameters:
-    - symbols: Symboles à analyser (ex: "AAPL,MSFT,GOOGL")
-    - hours: Nombre d'heures à considérer (défaut: 24)
-    
-    Returns:
-    - Recommandations classées par pertinence
-    """
-    
-    if not symbols:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Paramètre 'symbols' requis (ex: ?symbols=AAPL,MSFT)"
-        )
-    
-    symbol_list = [s.strip().upper() for s in symbols.split(",")]
-    
-    logger.info(f"📰 Analyse des recommandations pour: {symbol_list}")
-    
+def get_db():
+    from main import SessionLocal
+    db = SessionLocal()
     try:
-        # Récupérer les actualités
-        all_news = NewsService.get_news_for_portfolio(symbol_list, FINNHUB_API_KEY)
-        
-        # Filtrer les actualités récentes
-        recent_news = NewsService.filter_recent_news(all_news, hours=hours)
-        
-        logger.info(f"📰 {len(recent_news)} actualités récentes trouvées")
-        
-        # Générer les recommandations
-        recommendations = [
-            RecommendationEngine.generate_recommendation(
-                NewsService.get_article_details(article),
-                symbol_list
-            )
-            for article in recent_news
-        ]
-        
-        # Classer par pertinence
-        ranked = RecommendationEngine.rank_recommendations(recommendations)
-        
-        # Calculer le résumé
-        summary = {
-            "buy": sum(1 for r in ranked if "BUY" in r['recommendation_type']),
-            "sell": sum(1 for r in ranked if "SELL" in r['recommendation_type']),
-            "hold": sum(1 for r in ranked if "HOLD" in r['recommendation_type']),
-            "monitor": sum(1 for r in ranked if "MONITOR" in r['recommendation_type']),
-        }
-        
-        logger.info(f"✅ {len(ranked)} recommandations générées")
-        
-        return RecommendationResponse(
-            recommendations=ranked,
-            count=len(ranked),
-            summary=summary
-        )
-        
-    except Exception as e:
-        logger.error(f"❌ Erreur lors de la génération des recommandations: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur: {str(e)}"
-        )
+        yield db
+    finally:
+        db.close()
 
 
-@router.get("/recommendations/portfolio")
-async def get_portfolio_recommendations(
-    # Les symboles seront passés du frontend comme les ETFs du portefeuille
-    symbols: str = None,
-    hours: int = 24
+@router.get("/analyze")
+async def analyze_portfolio_news(
+    days: int = 3,
+    db: Session = Depends(get_db),
 ):
     """
-    Récupère les recommandations pour tout le portefeuille
-    (Endpoint simplifié qui utilise get_recommendations)
+    Analyse IA des actualités pour le portefeuille.
+
+    - Lit les positions actives depuis la DB
+    - Cherche les actualités récentes via NewsAPI
+    - Envoie à Claude pour analyse
+    - Retourne : résumé marché + analyse par article
     """
-    return await get_recommendations(symbols=symbols, hours=hours)
+    holdings = HoldingCRUD.get_all_active(db)
+    if not holdings:
+        raise HTTPException(status_code=404, detail="Aucune position dans le portefeuille.")
+
+    # Construire le contexte portefeuille pour Claude
+    holdings_ctx = []
+    symbols, names = [], []
+    for h in holdings:
+        asset = h.asset
+        live_price = FinanceService.get_current_price(asset.symbol) or asset.current_price
+        gain_pct = ((live_price - h.avg_purchase_price) / h.avg_purchase_price * 100) if h.avg_purchase_price else 0
+        holdings_ctx.append({
+            "symbol":        asset.symbol,
+            "name":          asset.name,
+            "quantity":      h.quantity,
+            "avg_price":     h.avg_purchase_price,
+            "current_price": live_price,
+            "gain_pct":      round(gain_pct, 1),
+        })
+        if asset.symbol not in symbols:
+            symbols.append(asset.symbol)
+            names.append(asset.name)
+
+    logger.info(f"Analyse pour {len(symbols)} actifs : {symbols}")
+
+    # Récupérer les actualités
+    articles = NewsService.get_news_for_portfolio(symbols, names, days=days)
+    if not articles:
+        return {
+            "market_summary": "Aucune actualité récente trouvée. Vérifiez votre clé NewsAPI dans Paramètres.",
+            "articles": [],
+            "holdings_count": len(holdings_ctx),
+        }
+
+    # Analyse Claude
+    result = AIService.analyze_news_for_portfolio(articles, holdings_ctx)
+
+    # Enrichir les articles analysés avec les données brutes (titre, url, source)
+    article_map = {i + 1: a for i, a in enumerate(articles)}
+    for item in result.get("articles", []):
+        idx = item.get("index", 0)
+        raw = article_map.get(idx, {})
+        item["title"]  = raw.get("title", "")
+        item["url"]    = raw.get("url", "")
+        item["source"] = raw.get("source", "")
+        item["date"]   = raw.get("date", "")
+
+    result["holdings_count"] = len(holdings_ctx)
+    result["articles_fetched"] = len(articles)
+    return result
 
 
-@router.post("/send-recommendations")
-async def send_recommendations_email(request: EmailNotificationRequest) -> dict:
-    """
-    Envoie les recommandations par email
-    
-    Body:
-    {
-        "email": "user@example.com",
-        "include_all": false  # Si false, seulement les fortes recommandations
-    }
-    """
-    
-    if not request.email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email requis"
-        )
-    
-    try:
-        logger.info(f"📧 Envoi des recommandations à {request.email}")
-        
-        # Récupérer les symboles du portefeuille
-        # NOTE: À adapter selon comment tu récupères les symboles du portefeuille
-        symbol_list = ["AAPL", "MSFT", "GOOGL"]  # TODO: à remplacer
-        
-        # Récupérer les actualités et générer les recommandations
-        all_news = NewsService.get_news_for_portfolio(symbol_list, FINNHUB_API_KEY)
-        recommendations = [
-            RecommendationEngine.generate_recommendation(
-                NewsService.get_article_details(article),
-                symbol_list
-            )
-            for article in all_news
-        ]
-        
-        # Filtrer si needed
-        if not request.include_all:
-            recommendations = [r for r in recommendations if r['confidence'] >= 60]
-        
-        ranked = RecommendationEngine.rank_recommendations(recommendations)
-        
-        # Envoyer l'email
-        success = EmailService.send_recommendation_email(request.email, ranked)
-        
-        if success:
-            return {
-                "status": "success",
-                "message": f"Email envoyé à {request.email}",
-                "recommendations_count": len(ranked)
-            }
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Impossible d'envoyer l'email"
-            )
-    
-    except Exception as e:
-        logger.error(f"❌ Erreur envoi email: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur: {str(e)}"
-        )
-
-
-@router.post("/test-email")
-async def test_email(email: str) -> dict:
-    """
-    Envoie un email de test
-    
-    Query parameter:
-    - email: adresse email pour le test
-    """
-    
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email requis"
-        )
-    
-    success = EmailService.test_email_config(email)
-    
-    if success:
-        return {"status": "success", "message": f"Email de test envoyé à {email}"}
-    else:
-        return {"status": "error", "message": "Impossible d'envoyer l'email de test"}
-
-
-@router.get("/debug/symbols")
-async def debug_symbols_news(symbols: str = None):
-    """
-    Endpoint de debugging - teste les actualités pour chaque symbole individuellement
-    
-    Query parameter:
-    - symbols: Symboles séparés par virgules
-    """
-    if not symbols:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Paramètre 'symbols' requis"
-        )
-    
-    symbol_list = [s.strip().upper() for s in symbols.split(",")]
-    
-    debug_results = {}
-    
-    for symbol in symbol_list:
-        try:
-            news = NewsService.get_news_for_symbol(symbol, FINNHUB_API_KEY)
-            debug_results[symbol] = {
-                "status": "ok",
-                "articles_count": len(news),
-                "sample": news[0] if news else None
-            }
-        except Exception as e:
-            debug_results[symbol] = {
-                "status": "error",
-                "error": str(e)
-            }
-    
+@router.get("/status")
+async def get_news_status():
+    """Vérifie quelles clés API sont configurées."""
     return {
-        "symbols_tested": symbol_list,
-        "results": debug_results,
-        "total_articles": sum(v.get("articles_count", 0) for v in debug_results.values() if v.get("status") == "ok")
+        "newsapi_configured":    bool(NewsService.get_api_key()),
+        "anthropic_configured":  bool(AIService.get_api_key()),
     }

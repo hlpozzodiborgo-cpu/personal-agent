@@ -65,6 +65,7 @@ export default function Home() {
     { id: 'evolution',    label: 'Évolution' },
     { id: 'consolidated', label: 'Par titre' },
     { id: 'positions',    label: 'Ordres passés' },
+    { id: 'news',         label: '✨ Actualités & IA' },
   ]
 
   return (
@@ -156,10 +157,10 @@ export default function Home() {
               <div className={activeTab !== 'positions'    ? 'hidden' : ''}>
                 <HoldingsList holdings={portfolio.holdings} onDelete={handleDeleteHolding} onEdit={setEditingHolding} />
               </div>
+              <div className={activeTab !== 'news'         ? 'hidden' : ''}><NewsRecommendations /></div>
             </div>
 
-            <TopPerformers topGainer={portfolio.top_gainer} topLoser={portfolio.top_loser} />
-            {/* Phase 2: News & Recommendations */}
+            {activeTab !== 'news' && <TopPerformers topGainer={portfolio.top_gainer} topLoser={portfolio.top_loser} />}
             <div className="mt-12 mb-8">
               <NewsRecommendations 
                 symbols={portfolio.holdings?.map(h => h.symbol) || []}

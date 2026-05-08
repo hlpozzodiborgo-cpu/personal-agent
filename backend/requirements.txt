@@ -7,3 +7,4 @@ yfinance>=0.2.32
 aiohttp>=3.9.1
 requests>=2.31.0
 python-dateutil>=2.8.2
+anthropic>=0.40.0

@@ -1,297 +1,179 @@
-/**
- * Composant NewsRecommendations
- * Phase 2: Actualités & Recommandations avec interface compacte
- */
-'use client';
+'use client'
 
-import { useEffect, useState } from 'react';
+import React, { useState } from 'react'
+import { analyzePortfolioNews, getNewsStatus } from '@/lib/api'
 
-export default function NewsRecommendations({ symbols = [] }) {
-  const [recommendations, setRecommendations] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [summary, setSummary] = useState({ buy: 0, sell: 0, hold: 0, monitor: 0 });
-  const [selectedCategory, setSelectedCategory] = useState(null); // 'buy', 'sell', 'hold', 'monitor'
-  const [selectedRec, setSelectedRec] = useState(null); // Recommandation détaillée
-  const [email, setEmail] = useState('');
-  const [emailMessage, setEmailMessage] = useState('');
-  const [sendingEmail, setSendingEmail] = useState(false);
+const SIGNAL_STYLE = {
+  RENFORCER: { bg: 'bg-green-100', text: 'text-green-800', border: 'border-green-200', dot: 'bg-green-500' },
+  ALLEGER:   { bg: 'bg-red-100',   text: 'text-red-800',   border: 'border-red-200',   dot: 'bg-red-500'   },
+  SURVEILLER:{ bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-200', dot: 'bg-amber-500'  },
+  CONSERVER: { bg: 'bg-gray-100',  text: 'text-gray-700',  border: 'border-gray-200',  dot: 'bg-gray-400'  },
+  AUCUN:     { bg: 'bg-gray-50',   text: 'text-gray-500',  border: 'border-gray-100',  dot: 'bg-gray-300'  },
+}
+const IMPACT_COLOR = { positif: 'text-green-600', negatif: 'text-red-600', neutre: 'text-gray-500' }
 
-  useEffect(() => {
-    if (symbols.length === 0) return;
-    fetchRecommendations();
-  }, [symbols]);
+export default function NewsRecommendations() {
+  const [result, setResult]     = useState(null)
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState('')
+  const [days, setDays]         = useState(3)
+  const [expanded, setExpanded] = useState(null)  // index de l'article ouvert
 
-  const fetchRecommendations = async () => {
-    setLoading(true);
-    setError(null);
-    
+  const handleAnalyze = async () => {
+    setLoading(true); setError(''); setResult(null); setExpanded(null)
     try {
-      const symbolsParam = symbols.join(',');
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      
-      const response = await fetch(
-        `${apiUrl}/api/news/recommendations?symbols=${symbolsParam}&hours=24`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`Erreur: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      setRecommendations(data.recommendations || []);
-      setSummary(data.summary || {});
-    } catch (err) {
-      console.error('❌ Erreur récupération recommandations:', err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getRecommendationsByType = (type) => {
-    return recommendations.filter(rec => {
-      if (type === 'buy') return rec.recommendation_type.includes('BUY');
-      if (type === 'sell') return rec.recommendation_type.includes('SELL');
-      if (type === 'hold') return rec.recommendation_type.includes('HOLD');
-      if (type === 'monitor') return rec.recommendation_type.includes('MONITOR');
-      return false;
-    });
-  };
-
-  const handleSendEmail = async () => {
-    if (!email) {
-      setEmailMessage('❌ Veuillez entrer votre email');
-      return;
-    }
-
-    setSendingEmail(true);
-    setEmailMessage('');
-
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/api/news/send-recommendations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: email,
-          include_all: false
-        })
-      });
-
-      const data = await response.json();
-      
-      if (response.ok) {
-        setEmailMessage(`✅ Recommandations envoyées à ${email}`);
-        setEmail('');
-        setTimeout(() => setEmailMessage(''), 5000);
+      const res = await analyzePortfolioNews(days)
+      if (res.data.error) {
+        setError(res.data.error)
       } else {
-        setEmailMessage(`❌ Erreur: ${data.detail || 'Impossible d\'envoyer les recommandations'}`);
+        setResult(res.data)
       }
-    } catch (err) {
-      console.error('Erreur envoi email:', err);
-      setEmailMessage('❌ Erreur réseau - vérifiez la configuration email');
+    } catch (e) {
+      setError(e.response?.data?.detail || e.message)
     } finally {
-      setSendingEmail(false);
+      setLoading(false)
     }
-  };
-
-  if (symbols.length === 0) {
-    return (
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
-        <p className="text-blue-700">📰 Aucun actif dans le portefeuille - impossible d'afficher les actualités</p>
-      </div>
-    );
   }
 
-  return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-900">📰 Actualités & Recommandations</h2>
-        <button
-          onClick={fetchRecommendations}
-          disabled={loading}
-          className="px-3 py-1 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
-        >
-          {loading ? '⏳' : '🔄'} Actualiser
-        </button>
-      </div>
+  const articles = result?.articles ?? []
+  const relevant = articles.filter(a => a.relevance !== 'faible')
 
-      {/* Email Configuration */}
-      <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg p-4 text-white">
-        <div className="flex gap-2 items-center">
-          <input
-            type="email"
-            placeholder="votre@email.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="flex-1 px-3 py-2 rounded text-gray-900 text-sm"
-          />
-          <button
-            onClick={handleSendEmail}
-            disabled={sendingEmail || loading}
-            className="px-4 py-2 bg-white text-purple-600 rounded font-medium hover:bg-gray-100 disabled:opacity-50 text-sm"
-          >
-            📧 Envoyer
+  return (
+    <div className="bg-white rounded-b-lg shadow p-6 space-y-6">
+
+      {/* En-tête + contrôles */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Actualités & Recommandations IA</h2>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Claude analyse les actualités récentes en tenant compte de votre portefeuille.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <select value={days} onChange={e => setDays(Number(e.target.value))}
+            className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-700">
+            <option value={1}>24 heures</option>
+            <option value={3}>3 jours</option>
+            <option value={7}>7 jours</option>
+          </select>
+          <button onClick={handleAnalyze} disabled={loading}
+            className="px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium flex items-center gap-2">
+            {loading
+              ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> Analyse en cours…</>
+              : '✨ Analyser'}
           </button>
         </div>
-        {emailMessage && (
-          <p className="text-sm mt-2 {emailMessage.includes('✅') ? 'text-green-100' : 'text-red-100'}">
-            {emailMessage}
-          </p>
-        )}
       </div>
 
-      {/* Error */}
+      {/* Erreur */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-          <p className="text-red-700 text-sm">❌ Erreur: {error}</p>
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          <strong>Erreur :</strong> {error}
+          {(error.includes('Anthropic') || error.includes('NewsAPI')) && (
+            <span className="ml-1">— Configurez les clés dans <strong>Paramètres ⚙️</strong>.</span>
+          )}
         </div>
       )}
 
-      {/* Summary Cards - Clickable */}
-      <div className="grid grid-cols-4 gap-3">
-        <button
-          onClick={() => setSelectedCategory(selectedCategory === 'buy' ? null : 'buy')}
-          className={`rounded-lg p-3 text-center transition cursor-pointer ${
-            selectedCategory === 'buy'
-              ? 'bg-green-200 border-2 border-green-600 scale-105'
-              : 'bg-green-50 border border-green-200 hover:bg-green-100'
-          }`}
-        >
-          <p className="text-green-600 text-2xl font-bold">{summary.buy || 0}</p>
-          <p className="text-green-700 text-xs font-semibold">À acheter</p>
-        </button>
+      {/* État initial */}
+      {!result && !loading && !error && (
+        <div className="py-16 text-center text-gray-400">
+          <p className="text-4xl mb-3">📰</p>
+          <p className="font-medium">Cliquez sur <strong>Analyser</strong> pour lancer l'analyse IA.</p>
+          <p className="text-sm mt-1">
+            Claude va récupérer les actualités des derniers {days} jours et les analyser<br />
+            en tenant compte de vos positions (ETF, secteurs, exposition géographique…).
+          </p>
+        </div>
+      )}
 
-        <button
-          onClick={() => setSelectedCategory(selectedCategory === 'sell' ? null : 'sell')}
-          className={`rounded-lg p-3 text-center transition cursor-pointer ${
-            selectedCategory === 'sell'
-              ? 'bg-red-200 border-2 border-red-600 scale-105'
-              : 'bg-red-50 border border-red-200 hover:bg-red-100'
-          }`}
-        >
-          <p className="text-red-600 text-2xl font-bold">{summary.sell || 0}</p>
-          <p className="text-red-700 text-xs font-semibold">À vendre</p>
-        </button>
+      {/* Résultats */}
+      {result && (
+        <div className="space-y-5">
 
-        <button
-          onClick={() => setSelectedCategory(selectedCategory === 'hold' ? null : 'hold')}
-          className={`rounded-lg p-3 text-center transition cursor-pointer ${
-            selectedCategory === 'hold'
-              ? 'bg-gray-300 border-2 border-gray-600 scale-105'
-              : 'bg-gray-50 border border-gray-200 hover:bg-gray-100'
-          }`}
-        >
-          <p className="text-gray-600 text-2xl font-bold">{summary.hold || 0}</p>
-          <p className="text-gray-700 text-xs font-semibold">À tenir</p>
-        </button>
-
-        <button
-          onClick={() => setSelectedCategory(selectedCategory === 'monitor' ? null : 'monitor')}
-          className={`rounded-lg p-3 text-center transition cursor-pointer ${
-            selectedCategory === 'monitor'
-              ? 'bg-yellow-200 border-2 border-yellow-600 scale-105'
-              : 'bg-yellow-50 border border-yellow-200 hover:bg-yellow-100'
-          }`}
-        >
-          <p className="text-yellow-600 text-2xl font-bold">{summary.monitor || 0}</p>
-          <p className="text-yellow-700 text-xs font-semibold">À surveiller</p>
-        </button>
-      </div>
-
-      {/* Category View - Modale */}
-      {selectedCategory && !selectedRec && (
-        <div className="bg-white border border-gray-300 rounded-lg p-4 max-h-64 overflow-y-auto">
-          <h3 className="font-bold text-gray-900 mb-3">
-            {selectedCategory === 'buy' && '🟢 À acheter'}
-            {selectedCategory === 'sell' && '🔴 À vendre'}
-            {selectedCategory === 'hold' && '⚪ À tenir'}
-            {selectedCategory === 'monitor' && '🟡 À surveiller'}
-          </h3>
-          
-          {loading && <p className="text-gray-500 text-sm">⏳ Chargement...</p>}
-          
-          {!loading && getRecommendationsByType(selectedCategory).length === 0 && (
-            <p className="text-gray-500 text-sm">Aucune recommandation dans cette catégorie</p>
+          {/* Résumé marché */}
+          {result.market_summary && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-1">
+                Résumé du marché — Claude {result.model ? `(${result.model})` : ''}
+              </p>
+              <p className="text-sm text-blue-900">{result.market_summary}</p>
+            </div>
           )}
 
-          <div className="space-y-2">
-            {getRecommendationsByType(selectedCategory).map((rec, idx) => (
-              <button
-                key={idx}
-                onClick={() => setSelectedRec(rec)}
-                className="w-full text-left bg-gray-50 hover:bg-gray-100 p-2 rounded border border-gray-200 transition"
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-semibold text-gray-900">{rec.symbol}</p>
-                    <p className="text-xs text-gray-600">{rec.title.substring(0, 50)}...</p>
+          {/* Méta */}
+          <p className="text-xs text-gray-400">
+            {result.articles_fetched ?? 0} articles analysés · {relevant.length} pertinents pour votre portefeuille
+          </p>
+
+          {/* Articles pertinents */}
+          {relevant.length === 0 && (
+            <p className="text-sm text-gray-500 py-4 text-center">
+              Aucune actualité directement pertinente trouvée sur cette période.
+            </p>
+          )}
+
+          <div className="space-y-3">
+            {relevant.map((a, i) => {
+              const style = SIGNAL_STYLE[a.signal] ?? SIGNAL_STYLE.AUCUN
+              const isOpen = expanded === i
+              return (
+                <div key={i}
+                  className={`border rounded-lg overflow-hidden ${style.border} cursor-pointer hover:shadow-sm transition`}
+                  onClick={() => setExpanded(isOpen ? null : i)}>
+                  {/* Ligne principale */}
+                  <div className={`flex items-start gap-3 p-4 ${style.bg}`}>
+                    <span className={`mt-1.5 w-2.5 h-2.5 rounded-full flex-shrink-0 ${style.dot}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded ${style.bg} ${style.text}`}>
+                          {a.signal}
+                        </span>
+                        {a.affected_symbols?.length > 0 && a.affected_symbols.map(s => (
+                          <span key={s} className="text-xs font-medium text-gray-600 bg-white px-2 py-0.5 rounded border border-gray-200">{s}</span>
+                        ))}
+                        <span className={`text-xs ml-auto ${IMPACT_COLOR[a.impact] ?? 'text-gray-500'}`}>
+                          {a.impact} · {a.confidence}% confiance
+                        </span>
+                      </div>
+                      <p className="text-sm font-medium text-gray-900 truncate">{a.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{a.source} · {a.date}</p>
+                    </div>
+                    <span className="text-gray-400 text-xs mt-1">{isOpen ? '▲' : '▼'}</span>
                   </div>
-                  <span className="text-xs font-bold bg-gray-200 px-2 py-1 rounded">
-                    {rec.confidence}%
-                  </span>
+
+                  {/* Détail déplié */}
+                  {isOpen && (
+                    <div className="px-4 pb-4 pt-2 bg-white border-t border-gray-100 space-y-2">
+                      <p className="text-sm text-gray-800">{a.analysis}</p>
+                      {a.url && (
+                        <a href={a.url} target="_blank" rel="noreferrer"
+                          className="text-xs text-blue-600 hover:underline" onClick={e => e.stopPropagation()}>
+                          Lire l'article complet →
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </button>
-            ))}
+              )
+            })}
           </div>
-        </div>
-      )}
 
-      {/* Detail View */}
-      {selectedRec && (
-        <div className="bg-white border border-gray-300 rounded-lg p-4">
-          <button
-            onClick={() => setSelectedRec(null)}
-            className="text-blue-600 hover:text-blue-800 text-sm font-medium mb-3"
-          >
-            ← Retour
-          </button>
-          
-          <div>
-            <div className="flex justify-between items-start mb-3">
-              <div>
-                <h3 className="text-xl font-bold text-gray-900">{selectedRec.symbol}</h3>
-                <p className={`text-sm ${selectedRec.sentiment_score > 0.3 ? 'text-green-600' : selectedRec.sentiment_score < -0.3 ? 'text-red-600' : 'text-gray-600'}`}>
-                  {selectedRec.sentiment_label}
-                </p>
+          {/* Articles peu pertinents (repliés) */}
+          {articles.length > relevant.length && (
+            <details className="text-xs text-gray-400">
+              <summary className="cursor-pointer hover:text-gray-600">
+                {articles.length - relevant.length} article(s) jugé(s) peu pertinents (cliquer pour voir)
+              </summary>
+              <div className="mt-2 space-y-1 pl-2">
+                {articles.filter(a => a.relevance === 'faible').map((a, i) => (
+                  <div key={i} className="truncate">— {a.title} ({a.source})</div>
+                ))}
               </div>
-              <div className="text-right">
-                <p className="text-2xl font-bold">{selectedRec.recommendation_type}</p>
-                <p className="text-xs text-gray-500">Confiance: {selectedRec.confidence}%</p>
-              </div>
-            </div>
-
-            <h4 className="font-semibold text-gray-900 mb-2">{selectedRec.title}</h4>
-            
-            {selectedRec.summary && (
-              <p className="text-sm text-gray-700 mb-3">{selectedRec.summary}</p>
-            )}
-
-            <div className="flex justify-between items-center text-xs text-gray-500 mb-3 pb-3 border-b">
-              <span>📰 {selectedRec.source}</span>
-              <span>⏰ {new Date(selectedRec.published_at).toLocaleDateString('fr-FR')}</span>
-            </div>
-
-            <a
-              href={selectedRec.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block text-blue-600 hover:text-blue-800 font-medium text-sm"
-            >
-              Lire l'article complet →
-            </a>
-          </div>
-        </div>
-      )}
-
-      {/* Empty State */}
-      {!loading && !selectedCategory && recommendations.length === 0 && !error && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
-          <p className="text-blue-700 text-sm">✨ Aucune actualité récente - cliquez sur Actualiser</p>
+            </details>
+          )}
         </div>
       )}
     </div>
-  );
+  )
 }

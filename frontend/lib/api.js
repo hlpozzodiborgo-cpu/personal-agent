@@ -54,9 +54,16 @@ export const getAssetPriceHistory = (symbol, period = '1mo') =>
   api.get(`/api/assets/${symbol}/price-history`, { params: { period } })
 
 // ============ SETTINGS ============
-export const getSettings = () => api.get('/api/settings')
-export const updateFinnhubKey = (key) => api.put('/api/settings/finnhub-key', null, { params: { key } })
-export const testFinnhubKey = () => api.get('/api/settings/test-finnhub')
+export const getSettings        = ()    => api.get('/api/settings')
+export const updateFinnhubKey   = (key) => api.put('/api/settings/finnhub-key',   null, { params: { key } })
+export const updateAnthropicKey = (key) => api.put('/api/settings/anthropic-key', null, { params: { key } })
+export const updateNewsApiKey   = (key) => api.put('/api/settings/newsapi-key',   null, { params: { key } })
+export const testFinnhubKey     = ()    => api.get('/api/settings/test-finnhub')
+
+// ============ NEWS & IA ============
+export const analyzePortfolioNews = (days = 3) =>
+  api.get('/api/news/analyze', { params: { days } })
+export const getNewsStatus = () => api.get('/api/news/status')
 
 // ============ HEALTH ============
 export const checkHealth = () => api.get('/health')
