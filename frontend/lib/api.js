@@ -38,8 +38,20 @@ export const addHolding = (assetId, quantity, purchaseDate, price = null, notes 
     params: { asset_id: assetId, quantity, purchase_date: purchaseDate, price, notes }
   })
 
-export const removeHolding = (holdingId) => 
+export const updateHolding = (holdingId, quantity, purchaseDate, price, notes = null) =>
+  api.put(`/api/holdings/${holdingId}`, null, {
+    params: { quantity, purchase_date: purchaseDate, price, notes }
+  })
+
+export const removeHolding = (holdingId) =>
   api.delete(`/api/holdings/${holdingId}`)
+
+// ============ PORTFOLIO HISTORY ============
+export const getPortfolioHistory = (period = '1mo') =>
+  api.get('/api/portfolio/history', { params: { period } })
+
+export const getAssetPriceHistory = (symbol, period = '1mo') =>
+  api.get(`/api/assets/${symbol}/price-history`, { params: { period } })
 
 // ============ SETTINGS ============
 export const getSettings = () => api.get('/api/settings')

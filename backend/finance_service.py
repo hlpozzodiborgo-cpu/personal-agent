@@ -185,8 +185,35 @@ class FinanceService:
 
     @staticmethod
     def _is_crypto(symbol: str) -> bool:
-        """Les cryptos et devises ne sont pas supportées par Finnhub en tier gratuit"""
         return "-USD" in symbol or "-EUR" in symbol or "=X" in symbol
+
+    @staticmethod
+    def _is_european(symbol: str) -> bool:
+        """Marches europeens : Finnhub free tier retourne des prix incorrects pour ces suffixes"""
+        eu_suffixes = ('.PA', '.DE', '.MI', '.AS', '.L', '.MC', '.VX', '.ST', '.HE', '.CO', '.BR', '.LS', '.OL', '.TO')
+        return symbol.upper().endswith(eu_suffixes)
+
+    @staticmethod
+    def _get_price_yahoo_direct(symbol: str) -> Optional[float]:
+        """Prix actuel via l'API Yahoo Finance (plus fiable que yfinance pour les ETF europeens)"""
+        try:
+            r = requests.get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                params={"range": "1d", "interval": "1d"},
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+                timeout=10
+            )
+            if r.status_code != 200:
+                return None
+            result = r.json().get("chart", {}).get("result")
+            if not result:
+                return None
+            meta = result[0].get("meta", {})
+            price = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")
+            return float(price) if price else None
+        except Exception as e:
+            logger.warning(f"Yahoo direct prix echoue pour {symbol}: {e}")
+            return None
 
     @staticmethod
     def _get_quote_finnhub(symbol: str) -> Optional[float]:
@@ -363,33 +390,34 @@ class FinanceService:
     @staticmethod
     def get_current_price(symbol: str) -> Optional[float]:
         """
-        Priorité: Cache → Finnhub (actions/ETF) → Yahoo Finance → Mock → Généré
+        Priorité:
+        - Crypto/devises/ETF europeens : Yahoo Finance direct API
+        - Actions US : Finnhub d'abord, Yahoo en fallback
         """
         cached = FinanceService._get_from_cache(symbol)
         if cached:
             return cached.get("current_price")
 
-        # Finnhub (sauf crypto/devises)
-        if not FinanceService._is_crypto(symbol):
+        use_yahoo_first = FinanceService._is_crypto(symbol) or FinanceService._is_european(symbol)
+
+        if not use_yahoo_first:
             price = FinanceService._get_quote_finnhub(symbol)
             if price:
-                FinanceService._save_to_cache(symbol, {
-                    "current_price": price, "symbol": symbol, "source": "finnhub"
-                })
+                FinanceService._save_to_cache(symbol, {"current_price": price, "symbol": symbol, "source": "finnhub"})
                 return price
 
-        # Yahoo Finance (fallback ou crypto)
-        try:
-            time.sleep(0.5)
-            ticker = yf.Ticker(symbol)
-            price = ticker.info.get("currentPrice")
+        # Yahoo Finance direct API (fiable pour les ETF EU et crypto)
+        price = FinanceService._get_price_yahoo_direct(symbol)
+        if price:
+            FinanceService._save_to_cache(symbol, {"current_price": price, "symbol": symbol, "source": "yahoo_direct"})
+            return price
+
+        # Finnhub en dernier recours pour les symboles europeens
+        if use_yahoo_first:
+            price = FinanceService._get_quote_finnhub(symbol)
             if price:
-                FinanceService._save_to_cache(symbol, {
-                    "current_price": float(price), "symbol": symbol, "source": "yahoo"
-                })
-                return float(price)
-        except Exception as e:
-            logger.warning(f"⚠️ Yahoo prix échoué pour {symbol}: {e}")
+                FinanceService._save_to_cache(symbol, {"current_price": price, "symbol": symbol, "source": "finnhub"})
+                return price
 
         if symbol in MOCK_DATA:
             return MOCK_DATA[symbol].get("current_price")
@@ -509,7 +537,7 @@ class FinanceService:
             total_current_value += current_value
             
             holdings_stats.append({
-                "id": holding.get("id"),  # 🔑 Inclure l'ID pour la suppression frontend
+                "id": holding.get("id"),
                 "symbol": holding["symbol"],
                 "name": holding["name"],
                 "quantity": quantity,
@@ -518,7 +546,9 @@ class FinanceService:
                 "invested": invested,
                 "current_value": current_value,
                 "gain_loss": gain_loss,
-                "gain_loss_percent": gain_loss_percent
+                "gain_loss_percent": gain_loss_percent,
+                "purchase_date": holding.get("purchase_date"),
+                "notes": holding.get("notes"),
             })
         
         total_gain_loss = total_current_value - total_invested

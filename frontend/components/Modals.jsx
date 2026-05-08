@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { addHolding, addAsset, searchAssets, getPriceAtDate, getSettings, updateFinnhubKey, testFinnhubKey } from '@/lib/api'
+import { addHolding, updateHolding, addAsset, searchAssets, getPriceAtDate, getSettings, updateFinnhubKey, testFinnhubKey } from '@/lib/api'
 
 export const AddAssetModal = ({ isOpen, onClose, onSuccess }) => {
   const [query, setQuery] = useState('')
@@ -457,6 +457,134 @@ export const SettingsModal = ({ isOpen, onClose }) => {
         <button onClick={onClose} className="w-full mt-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">
           Fermer
         </button>
+      </div>
+    </div>
+  )
+}
+
+export const EditHoldingModal = ({ isOpen, onClose, onSuccess, holding }) => {
+  const [quantity, setQuantity] = useState('')
+  const [purchaseDate, setPurchaseDate] = useState('')
+  const [exactPrice, setExactPrice] = useState('')
+  const [notes, setNotes] = useState('')
+  const [historicalPrice, setHistoricalPrice] = useState(null)
+  const [fetchingPrice, setFetchingPrice] = useState(false)
+  const [priceUnavailable, setPriceUnavailable] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const today = new Date().toISOString().split('T')[0]
+
+  useEffect(() => {
+    if (isOpen && holding) {
+      setQuantity(holding.quantity?.toString() || '')
+      setPurchaseDate(holding.purchase_date || '')
+      setExactPrice(holding.avg_price?.toFixed(4) || '')
+      setNotes(holding.notes || '')
+      setHistoricalPrice(holding.avg_price || null)
+      setPriceUnavailable(false)
+      setError('')
+    }
+  }, [isOpen, holding])
+
+  // Re-fetch price uniquement si la date change
+  useEffect(() => {
+    if (!holding?.symbol || !purchaseDate) return
+    if (purchaseDate === holding.purchase_date) return
+    setFetchingPrice(true)
+    setHistoricalPrice(null)
+    setPriceUnavailable(false)
+    setExactPrice('')
+    getPriceAtDate(holding.symbol, purchaseDate)
+      .then(res => setHistoricalPrice(res.data.price))
+      .catch(() => setPriceUnavailable(true))
+      .finally(() => setFetchingPrice(false))
+  }, [purchaseDate])
+
+  const effectivePrice = exactPrice ? parseFloat(exactPrice) : historicalPrice
+  const canSubmit = quantity && purchaseDate && effectivePrice && !loading
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!canSubmit) return
+    setLoading(true); setError('')
+    try {
+      await updateHolding(holding.id, parseFloat(quantity), purchaseDate, effectivePrice, notes || null)
+      onSuccess(); onClose()
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message)
+    } finally { setLoading(false) }
+  }
+
+  if (!isOpen || !holding) return null
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
+        <h2 className="text-2xl font-bold mb-1">Modifier l'ordre</h2>
+        <p className="text-sm text-gray-500 mb-4">{holding.symbol} — {holding.name}</p>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Date d'achat *</label>
+            <input type="date" value={purchaseDate} onChange={e => setPurchaseDate(e.target.value)}
+              max={today} required
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+          </div>
+
+          {(fetchingPrice || historicalPrice || priceUnavailable) && (
+            <div className={`p-3 rounded-lg text-sm ${priceUnavailable ? 'bg-amber-50 border border-amber-200 text-amber-700' : 'bg-blue-50 border border-blue-200 text-blue-700'}`}>
+              {fetchingPrice && <div className="flex items-center gap-2"><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500" />Récupération du prix…</div>}
+              {!fetchingPrice && historicalPrice && !exactPrice && <span>Prix de clôture : <strong>{historicalPrice.toFixed(4)} €</strong></span>}
+              {!fetchingPrice && historicalPrice && exactPrice && <span>Historique : {historicalPrice.toFixed(4)} € — <strong>remplacé par {parseFloat(exactPrice).toFixed(4)} €</strong></span>}
+              {!fetchingPrice && priceUnavailable && <span>Prix introuvable pour cette date — entrez-le manuellement.</span>}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Prix unitaire {priceUnavailable ? '*' : '(optionnel — remplace le prix historique)'}
+            </label>
+            <input type="number" step="0.0001" min="0"
+              placeholder={historicalPrice ? `${historicalPrice.toFixed(4)} (automatique)` : 'Ex: 6.57'}
+              value={exactPrice} onChange={e => setExactPrice(e.target.value)}
+              required={priceUnavailable && !historicalPrice}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Quantité *</label>
+            <input type="number" step="0.0001" min="0" value={quantity}
+              onChange={e => setQuantity(e.target.value)} required
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+          </div>
+
+          {effectivePrice && quantity && (
+            <div className="text-sm text-gray-500 text-right">
+              Total : <strong className="text-gray-800">{(effectivePrice * parseFloat(quantity)).toFixed(2)} €</strong>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optionnel)</label>
+            <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+              placeholder="Ex: Investissement long terme"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+          </div>
+
+          {error && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
+
+          <div className="flex gap-2 pt-1">
+            <button type="submit" disabled={!canSubmit}
+              className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed">
+              {loading ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+            <button type="button" onClick={onClose} className="flex-1 bg-gray-200 text-gray-800 py-2 rounded-lg hover:bg-gray-300">
+              Annuler
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )

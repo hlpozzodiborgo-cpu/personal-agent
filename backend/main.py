@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from config import DATABASE_URL, DEBUG
-from models import Base, Asset as AssetModel, Transaction as TransactionModel, AppSetting
+from models import Base, Asset as AssetModel, Holding as HoldingModel, Transaction as TransactionModel, AppSetting
 from schemas import (
     AssetCreate, Asset, HoldingCreate, Holding,
     PortfolioStats, PortfolioDetailResponse, TransactionCreate
@@ -282,6 +282,168 @@ async def add_holding(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@app.get("/api/assets/{symbol}/price-history", tags=["Assets"])
+async def get_asset_price_history(symbol: str, period: str = "1mo"):
+    """Prix historiques bruts d'un symbole (pour comparaison de courbes)"""
+    import requests as req
+    from datetime import datetime, timedelta
+    period_cfg = {
+        "1d":  (timedelta(days=2),    "1d"),   # veille + aujourd'hui comme reference
+        "1w":  (timedelta(weeks=1),   "1d"),
+        "1mo": (timedelta(days=30),   "1d"),
+        "1y":  (timedelta(days=365),  "1d"),
+        "all": (timedelta(days=1825), "1d"),
+    }
+    delta, interval = period_cfg.get(period, (timedelta(days=30), "1d"))
+    now = datetime.now()
+    start_ts = int((now - delta).timestamp())
+    is_intraday = interval in ("5m", "1h")
+    try:
+        r = req.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+            params={"period1": start_ts, "period2": int(now.timestamp()), "interval": interval},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10
+        )
+        if r.status_code != 200:
+            raise HTTPException(status_code=404, detail=f"{symbol} non trouve")
+        result = r.json().get("chart", {}).get("result")
+        if not result:
+            raise HTTPException(status_code=404, detail=f"Pas de donnees pour {symbol}")
+        timestamps = result[0].get("timestamp", [])
+        closes = result[0]["indicators"]["quote"][0].get("close", [])
+        data = [
+            {"date": datetime.fromtimestamp(ts).isoformat() if is_intraday else datetime.fromtimestamp(ts).strftime("%Y-%m-%d"),
+             "value": price}
+            for ts, price in zip(timestamps, closes) if price is not None
+        ]
+        return {"symbol": symbol, "data": data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/portfolio/history", tags=["Portfolio"])
+async def get_portfolio_history(period: str = "1mo", db: Session = Depends(get_db)):
+    """Valeur historique du portefeuille reconstituee jour par jour"""
+    import requests as req
+
+    holdings = HoldingCRUD.get_all_active(db)
+    if not holdings:
+        return {"data": [], "order_dates": []}
+
+    now = datetime.now()
+    period_cfg = {
+        "1d":  (now - __import__('datetime').timedelta(days=1),   "5m"),
+        "1w":  (now - __import__('datetime').timedelta(weeks=1),  "1h"),
+        "1mo": (now - __import__('datetime').timedelta(days=30),  "1h"),
+        "1y":  (now - __import__('datetime').timedelta(days=365), "1d"),
+        "all": (None,                                             "1d"),
+    }
+    start_dt, interval = period_cfg.get(period, period_cfg["1mo"])
+
+    if start_dt is None:
+        valid_dates = [h.purchase_date for h in holdings if h.purchase_date]
+        if not valid_dates:
+            return {"data": [], "order_dates": []}
+        start_dt = min(valid_dates)
+
+    start_ts = int(start_dt.timestamp())
+    end_ts   = int(now.timestamp())
+    is_intraday = interval in ("5m", "1h")
+
+    # Prix historiques par symbole : {symbol: {timestamp: price}}
+    unique_symbols = list(set(h.asset.symbol for h in holdings))
+    symbol_prices = {}
+    for symbol in unique_symbols:
+        try:
+            r = req.get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                params={"period1": start_ts, "period2": end_ts, "interval": interval},
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+                timeout=10
+            )
+            if r.status_code != 200:
+                continue
+            result = r.json().get("chart", {}).get("result")
+            if not result:
+                continue
+            timestamps = result[0].get("timestamp", [])
+            closes = result[0]["indicators"]["quote"][0].get("close", [])
+            symbol_prices[symbol] = {
+                ts: price for ts, price in zip(timestamps, closes) if price is not None
+            }
+        except Exception as e:
+            logger.error(f"History error {symbol}: {e}")
+
+    if not symbol_prices:
+        return {"data": [], "order_dates": []}
+
+    # Forward-fill : reporter le dernier prix connu sur les timestamps manquants.
+    # Nécessaire quand le portefeuille mixe des actifs de marchés différents
+    # (ex: ETF Euronext + action NYSE) qui ont des jours fériés distincts.
+    all_timestamps_sorted = sorted(set(ts for prices in symbol_prices.values() for ts in prices))
+    for symbol in symbol_prices:
+        last_price = None
+        for ts in all_timestamps_sorted:
+            if ts in symbol_prices[symbol]:
+                last_price = symbol_prices[symbol][ts]
+            elif last_price is not None:
+                symbol_prices[symbol][ts] = last_price
+
+    # Reconstruction jour par jour avec TWR (Time-Weighted Return)
+    # Le TWR elimine l'effet des depot/retraits pour comparer equitablement
+    # avec d'autres actifs. Standard industrie (CFA Institute).
+    all_timestamps = all_timestamps_sorted
+    data = []
+    twr_factor = 1.0
+    prev_total = None  # Valeur totale au timestamp precedent (avec tous les ordres actifs)
+
+    for ts in all_timestamps:
+        dt = datetime.fromtimestamp(ts)
+        date_str = dt.isoformat() if is_intraday else dt.strftime("%Y-%m-%d")
+        current_d = dt.date()
+
+        current_total = 0.0  # Tous les ordres actifs aujourd'hui (y compris nouveaux)
+        old_total = 0.0      # Ordres actifs AVANT aujourd'hui (exclut depots du jour)
+
+        for holding in holdings:
+            if not holding.purchase_date:
+                continue
+            price = symbol_prices.get(holding.asset.symbol, {}).get(ts)
+            if not price:
+                continue
+            purchase_d = holding.purchase_date.date()
+            if purchase_d <= current_d:
+                current_total += holding.quantity * price
+            if purchase_d < current_d:
+                old_total += holding.quantity * price
+
+        if current_total <= 0:
+            continue
+
+        if prev_total is None or prev_total <= 0:
+            twr_factor = 1.0          # Initialisation
+        elif old_total > 0:
+            twr_factor *= (old_total / prev_total)  # Rendement du jour hors depot
+
+        prev_total = current_total
+        data.append({"date": date_str, "value": round(current_total, 2), "twr": round(twr_factor * 100, 2)})
+
+    # Dates d'ordres dans la periode (pas pour intraday)
+    order_dates = [] if is_intraday else sorted(set(
+        h.purchase_date.strftime("%Y-%m-%d")
+        for h in holdings
+        if h.purchase_date and h.purchase_date.timestamp() >= start_ts
+    ))
+
+    # Capital total investi (somme de tous les achats)
+    total_invested = round(sum(h.total_cost for h in holdings), 2)
+
+    return {"data": data, "order_dates": order_dates, "total_invested": total_invested}
+
+
 @app.get("/api/portfolio", tags=["Portfolio"], response_model=dict)
 async def get_portfolio_overview(db: Session = Depends(get_db)):
     """
@@ -323,7 +485,9 @@ async def get_portfolio_overview(db: Session = Depends(get_db)):
                 "quantity": holding.quantity,
                 "avg_purchase_price": holding.avg_purchase_price,
                 "current_price": live_price,
-                "total_invested": holding.total_cost
+                "total_invested": holding.total_cost,
+                "purchase_date": holding.purchase_date.strftime("%Y-%m-%d") if holding.purchase_date else None,
+                "notes": holding.notes
             })
         
         # Calcule les stats
@@ -335,7 +499,7 @@ async def get_portfolio_overview(db: Session = Depends(get_db)):
                 "total_current_value": stats["total_current_value"],
                 "total_gain_loss": stats["total_gain_loss"],
                 "gain_loss_percent": stats["total_gain_loss_percent"],
-                "number_of_holdings": stats["number_of_holdings"],
+                "number_of_holdings": len(set(h["symbol"] for h in holdings_data)),
                 "last_updated": datetime.utcnow().isoformat()
             },
             "holdings": stats["holdings"],
@@ -348,6 +512,43 @@ async def get_portfolio_overview(db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+@app.put("/api/holdings/{holding_id}", tags=["Holdings"])
+async def update_holding(
+    holding_id: int,
+    quantity: float,
+    purchase_date: str,
+    price: float,
+    notes: str = None,
+    db: Session = Depends(get_db)
+):
+    holding = db.query(HoldingModel).filter(
+        HoldingModel.id == holding_id, HoldingModel.is_active == True
+    ).first()
+    if not holding:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Position non trouvee")
+    try:
+        purchase_dt = datetime.strptime(purchase_date, "%Y-%m-%d")
+        holding.quantity = quantity
+        holding.avg_purchase_price = price
+        holding.total_cost = quantity * price
+        holding.purchase_date = purchase_dt
+        holding.notes = notes
+        transaction = db.query(TransactionModel).filter(
+            TransactionModel.holding_id == holding_id
+        ).first()
+        if transaction:
+            transaction.quantity = quantity
+            transaction.price_per_unit = price
+            transaction.total_amount = quantity * price
+            transaction.date = purchase_dt
+            transaction.notes = notes or "Position initiale"
+        db.commit()
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Erreur modification position: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.delete("/api/holdings/{holding_id}", tags=["Holdings"])
