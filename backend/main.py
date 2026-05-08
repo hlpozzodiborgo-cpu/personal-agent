@@ -573,6 +573,14 @@ async def remove_holding(holding_id: int, db: Session = Depends(get_db)):
 
 
 # ============ SETTINGS ============
+def _is_real_key(value) -> bool:
+    """Verifie qu'une cle est reelle (non vide, non placeholder)."""
+    if not value:
+        return False
+    s = str(value).strip()
+    return bool(s) and not s.lower().startswith("votre_") and s != ""
+
+
 def _save_setting(db: Session, key: str, value: str):
     s = db.query(AppSetting).filter(AppSetting.key == key).first()
     if s:
@@ -582,12 +590,20 @@ def _save_setting(db: Session, key: str, value: str):
     db.commit()
 
 
+def _delete_setting(db: Session, key: str, setter):
+    s = db.query(AppSetting).filter(AppSetting.key == key).first()
+    if s:
+        s.value = None
+        db.commit()
+    setter("")
+
+
 @app.get("/api/settings", tags=["Settings"])
 async def get_settings():
     return {
-        "finnhub_configured":   bool(FinanceService.get_finnhub_key()),
-        "anthropic_configured": bool(AIService.get_api_key()),
-        "newsapi_configured":   bool(NewsService.get_api_key()),
+        "finnhub_configured":   _is_real_key(FinanceService.get_finnhub_key()),
+        "anthropic_configured": _is_real_key(AIService.get_api_key()),
+        "newsapi_configured":   _is_real_key(NewsService.get_api_key()),
     }
 
 
@@ -597,11 +613,21 @@ async def update_finnhub_key(key: str, db: Session = Depends(get_db)):
     FinanceService.set_finnhub_key(key)
     return {"success": True}
 
+@app.delete("/api/settings/finnhub-key", tags=["Settings"])
+async def delete_finnhub_key(db: Session = Depends(get_db)):
+    _delete_setting(db, "finnhub_api_key", FinanceService.set_finnhub_key)
+    return {"success": True}
+
 
 @app.put("/api/settings/anthropic-key", tags=["Settings"])
 async def update_anthropic_key(key: str, db: Session = Depends(get_db)):
     _save_setting(db, "anthropic_api_key", key)
     AIService.set_api_key(key)
+    return {"success": True}
+
+@app.delete("/api/settings/anthropic-key", tags=["Settings"])
+async def delete_anthropic_key(db: Session = Depends(get_db)):
+    _delete_setting(db, "anthropic_api_key", AIService.set_api_key)
     return {"success": True}
 
 
@@ -611,13 +637,51 @@ async def update_newsapi_key(key: str, db: Session = Depends(get_db)):
     NewsService.set_api_key(key)
     return {"success": True}
 
+@app.delete("/api/settings/newsapi-key", tags=["Settings"])
+async def delete_newsapi_key(db: Session = Depends(get_db)):
+    _delete_setting(db, "newsapi_key", NewsService.set_api_key)
+    return {"success": True}
+
 
 @app.get("/api/settings/test-finnhub", tags=["Settings"])
 async def test_finnhub_key():
     price = FinanceService._get_quote_finnhub("AAPL")
     if price:
-        return {"success": True, "message": f"Cle valide — AAPL: ${price:.2f}"}
-    return {"success": False, "message": "Cle invalide ou limite atteinte"}
+        return {"success": True, "message": f"Connexion Finnhub OK — AAPL: ${price:.2f}"}
+    return {"success": False, "message": "Cle invalide ou rate limit atteint"}
+
+@app.get("/api/settings/test-anthropic", tags=["Settings"])
+async def test_anthropic_key():
+    if not _is_real_key(AIService.get_api_key()):
+        return {"success": False, "message": "Cle non configuree"}
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=AIService.get_api_key())
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001", max_tokens=8,
+            messages=[{"role": "user", "content": "Reply: OK"}]
+        )
+        return {"success": True, "message": f"Claude connecte ({resp.model.split('-')[1]})"}
+    except Exception as e:
+        return {"success": False, "message": str(e)[:120]}
+
+@app.get("/api/settings/test-newsapi", tags=["Settings"])
+async def test_newsapi_key():
+    if not _is_real_key(NewsService.get_api_key()):
+        return {"success": False, "message": "Cle non configuree"}
+    try:
+        import requests as req
+        r = req.get("https://newsapi.org/v2/everything",
+                    params={"q": "market", "pageSize": 1, "apiKey": NewsService.get_api_key()},
+                    timeout=5)
+        if r.status_code == 200:
+            n = r.json().get("totalResults", 0)
+            return {"success": True, "message": f"NewsAPI OK — {n:,} articles indexés"}
+        if r.status_code == 401:
+            return {"success": False, "message": "Cle invalide"}
+        return {"success": False, "message": f"Erreur HTTP {r.status_code}"}
+    except Exception as e:
+        return {"success": False, "message": str(e)[:120]}
 
 
 # ============ ROOT ============

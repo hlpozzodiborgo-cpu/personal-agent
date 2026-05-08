@@ -58,7 +58,12 @@ export const getSettings        = ()    => api.get('/api/settings')
 export const updateFinnhubKey   = (key) => api.put('/api/settings/finnhub-key',   null, { params: { key } })
 export const updateAnthropicKey = (key) => api.put('/api/settings/anthropic-key', null, { params: { key } })
 export const updateNewsApiKey   = (key) => api.put('/api/settings/newsapi-key',   null, { params: { key } })
+export const deleteFinnhubKey   = ()    => api.delete('/api/settings/finnhub-key')
+export const deleteAnthropicKey = ()    => api.delete('/api/settings/anthropic-key')
+export const deleteNewsApiKey   = ()    => api.delete('/api/settings/newsapi-key')
 export const testFinnhubKey     = ()    => api.get('/api/settings/test-finnhub')
+export const testAnthropicKey   = ()    => api.get('/api/settings/test-anthropic')
+export const testNewsApiKey     = ()    => api.get('/api/settings/test-newsapi')
 
 // ============ NEWS & IA ============
 export const analyzePortfolioNews = (days = 3) =>
