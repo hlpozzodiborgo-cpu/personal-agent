@@ -9,6 +9,10 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 import logging
 
+# ============ CONFIGURATION ============
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 from config import DATABASE_URL, DEBUG
 from models import Base, Asset as AssetModel, Holding as HoldingModel, Transaction as TransactionModel, AppSetting
 from schemas import (
@@ -17,10 +21,9 @@ from schemas import (
 )
 from crud import AssetCRUD, HoldingCRUD
 from finance_service import FinanceService
-
-# ============ CONFIGURATION ============
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from ai_service import AIService
+from news_service import NewsService
+from routes_news import router as news_router
 
 # Database
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
@@ -36,12 +39,17 @@ with engine.connect() as _conn:
     except Exception:
         pass
 
-# Charger la cle Finnhub depuis la DB (priorite sur le .env)
+# Charger toutes les cles API depuis la DB (priorite sur le .env)
 _startup_db = SessionLocal()
 try:
-    _setting = _startup_db.query(AppSetting).filter(AppSetting.key == "finnhub_api_key").first()
-    if _setting and _setting.value:
-        FinanceService.set_finnhub_key(_setting.value)
+    for _key, _setter in [
+        ("finnhub_api_key",   FinanceService.set_finnhub_key),
+        ("anthropic_api_key", AIService.set_api_key),
+        ("newsapi_key",       NewsService.set_api_key),
+    ]:
+        _s = _startup_db.query(AppSetting).filter(AppSetting.key == _key).first()
+        if _s and _s.value:
+            _setter(_s.value)
 finally:
     _startup_db.close()
 
@@ -49,8 +57,9 @@ finally:
 app = FastAPI(
     title="Investor AI API",
     description="API pour un agent IA analyste financier personnel",
-    version="0.1.0"
+    version="2.0.0"
 )
+app.include_router(news_router)
 
 # CORS
 app.add_middleware(
@@ -564,20 +573,42 @@ async def remove_holding(holding_id: int, db: Session = Depends(get_db)):
 
 
 # ============ SETTINGS ============
+def _save_setting(db: Session, key: str, value: str):
+    s = db.query(AppSetting).filter(AppSetting.key == key).first()
+    if s:
+        s.value = value
+    else:
+        db.add(AppSetting(key=key, value=value))
+    db.commit()
+
+
 @app.get("/api/settings", tags=["Settings"])
 async def get_settings():
-    return {"finnhub_configured": bool(FinanceService.get_finnhub_key())}
+    return {
+        "finnhub_configured":   bool(FinanceService.get_finnhub_key()),
+        "anthropic_configured": bool(AIService.get_api_key()),
+        "newsapi_configured":   bool(NewsService.get_api_key()),
+    }
 
 
 @app.put("/api/settings/finnhub-key", tags=["Settings"])
 async def update_finnhub_key(key: str, db: Session = Depends(get_db)):
-    setting = db.query(AppSetting).filter(AppSetting.key == "finnhub_api_key").first()
-    if setting:
-        setting.value = key
-    else:
-        db.add(AppSetting(key="finnhub_api_key", value=key))
-    db.commit()
+    _save_setting(db, "finnhub_api_key", key)
     FinanceService.set_finnhub_key(key)
+    return {"success": True}
+
+
+@app.put("/api/settings/anthropic-key", tags=["Settings"])
+async def update_anthropic_key(key: str, db: Session = Depends(get_db)):
+    _save_setting(db, "anthropic_api_key", key)
+    AIService.set_api_key(key)
+    return {"success": True}
+
+
+@app.put("/api/settings/newsapi-key", tags=["Settings"])
+async def update_newsapi_key(key: str, db: Session = Depends(get_db)):
+    _save_setting(db, "newsapi_key", key)
+    NewsService.set_api_key(key)
     return {"success": True}
 
 
