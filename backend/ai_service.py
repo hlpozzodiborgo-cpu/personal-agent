@@ -4,7 +4,7 @@ Service d'analyse IA multi-fournisseur.
 Fournisseurs supportés :
   - claude  : Anthropic Claude Haiku (~0.001 $/analyse, $5 crédits offerts)
   - gemini  : Google Gemini 1.5 Flash (GRATUIT — 1 M tokens/jour, 15 req/min)
-  - groq    : Groq avec Llama 3.1 70B  (GRATUIT — 14 400 req/jour)
+  - groq    : Groq avec Llama 3.3 70B  (GRATUIT — 14 400 req/jour)
 
 Le fournisseur actif est configurable dans Paramètres.
 L'analyse est déclenchée à la demande (pas en arrière-plan).
@@ -98,7 +98,7 @@ class AIService:
             r = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": "Reply: OK"}], "max_tokens": 4},
+                json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": "Reply: OK"}], "max_tokens": 4},
                 timeout=8,
             )
             if r.status_code == 200:
@@ -248,13 +248,14 @@ Réponds UNIQUEMENT avec ce JSON valide (aucun texte avant ou après) :
             r = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": "llama-3.1-70b-versatile",
+                json={"model": "llama-3.3-70b-versatile",
                       "messages": [{"role": "user", "content": AIService._build_prompt(articles, holdings)}],
                       "max_tokens": 2048, "temperature": 0.2},
                 timeout=30,
             )
             if r.status_code != 200:
-                return {"error": f"Groq erreur {r.status_code}", "articles": [], "market_summary": ""}
+                detail = r.json().get("error", {}).get("message", r.text[:120]) if r.content else f"HTTP {r.status_code}"
+                return {"error": f"Groq : {detail}", "articles": [], "market_summary": ""}
             raw = r.json()["choices"][0]["message"]["content"]
             result = AIService._parse_json_response(raw)
             result["model"] = "Llama 3.1 70B via Groq (gratuit)"
