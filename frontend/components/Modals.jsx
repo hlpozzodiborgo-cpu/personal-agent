@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { addHolding, updateHolding, addAsset, searchAssets, getPriceAtDate, getSettings, updateFinnhubKey, updateAnthropicKey, updateNewsApiKey, testFinnhubKey } from '@/lib/api'
+import { addHolding, updateHolding, addAsset, searchAssets, getPriceAtDate, getSettings, updateFinnhubKey, updateAnthropicKey, updateNewsApiKey, deleteFinnhubKey, deleteAnthropicKey, deleteNewsApiKey, testFinnhubKey, testAnthropicKey, testNewsApiKey } from '@/lib/api'
 
 export const AddAssetModal = ({ isOpen, onClose, onSuccess }) => {
   const [query, setQuery] = useState('')
@@ -348,129 +348,161 @@ export const AddHoldingModal = ({ isOpen, onClose, onSuccess, availableAssets })
   )
 }
 
-// Composant générique pour un champ de clé API dans les Paramètres
-const ApiKeyField = ({ label, link, linkText, configuredKey, updateFn }) => {
-  const [key, setKey] = useState('')
-  const [show, setShow] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [saving, setSaving] = useState(false)
-
-  const handleSave = async () => {
-    if (!key.trim()) return
-    setSaving(true)
-    try { await updateFn(key.trim()); setSaved(true); setKey('') }
-    catch {}
-    finally { setSaving(false) }
-  }
-
-  return (
-    <div className="mb-5">
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        {label}
-        {link && <a href={link} target="_blank" rel="noreferrer" className="ml-2 text-blue-500 hover:underline text-xs font-normal">{linkText} →</a>}
-      </label>
-      <div className={`flex items-center gap-2 text-xs mb-2 ${configuredKey ? 'text-green-600' : 'text-amber-600'}`}>
-        <span className={`w-2 h-2 rounded-full ${configuredKey ? 'bg-green-500' : 'bg-amber-400'}`} />
-        {configuredKey ? 'Configurée' : 'Non configurée'}
-      </div>
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <input type={show ? 'text' : 'password'}
-            placeholder={configuredKey ? '••••••••••••• (active)' : 'Collez votre clé ici'}
-            value={key} onChange={e => { setKey(e.target.value); setSaved(false) }}
-            className="w-full px-4 py-2 pr-14 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm" />
-          <button type="button" onClick={() => setShow(v => !v)}
-            className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 text-xs">
-            {show ? 'Cacher' : 'Voir'}
-          </button>
-        </div>
-        <button onClick={handleSave} disabled={!key.trim() || saving}
-          className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 text-sm font-medium whitespace-nowrap">
-          {saving ? '…' : 'Sauvegarder'}
-        </button>
-      </div>
-      {saved && <p className="text-green-600 text-xs mt-1">Clé sauvegardée.</p>}
-    </div>
-  )
-}
-
 export const SettingsModal = ({ isOpen, onClose }) => {
   const [status, setStatus] = useState({ finnhub_configured: false, anthropic_configured: false, newsapi_configured: false })
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState(null)
+  const [keys, setKeys]         = useState({ finnhub: '', anthropic: '', newsapi: '' })
+  const [show, setShow]         = useState({ finnhub: false, anthropic: false, newsapi: false })
+  const [saving, setSaving]     = useState({ finnhub: false, anthropic: false, newsapi: false })
+  const [deleting, setDeleting] = useState({ finnhub: false, anthropic: false, newsapi: false })
+  const [testing, setTesting]   = useState({ finnhub: false, anthropic: false, newsapi: false })
+  const [testResults, setTestResults] = useState({})
+  const [savedMsg, setSavedMsg] = useState({})
+
+  const refresh = () => getSettings().then(r => setStatus(r.data)).catch(() => {})
 
   useEffect(() => {
     if (isOpen) {
-      setTestResult(null)
-      getSettings().then(res => setStatus(res.data)).catch(() => {})
+      setKeys({ finnhub: '', anthropic: '', newsapi: '' })
+      setShow({ finnhub: false, anthropic: false, newsapi: false })
+      setTestResults({}); setSavedMsg({})
+      refresh()
     }
   }, [isOpen])
 
-  // Re-fetch status after a key is saved
-  const refresh = () => getSettings().then(res => setStatus(res.data)).catch(() => {})
+  const handleSave = async (id, updateFn) => {
+    const val = keys[id].trim()
+    if (!val) return
+    setSaving(s => ({ ...s, [id]: true }))
+    try {
+      await updateFn(val)
+      await refresh()
+      setKeys(k => ({ ...k, [id]: '' }))
+      setSavedMsg(m => ({ ...m, [id]: 'Clé sauvegardée.' }))
+      setTimeout(() => setSavedMsg(m => ({ ...m, [id]: '' })), 3000)
+    } catch { setSavedMsg(m => ({ ...m, [id]: 'Erreur lors de la sauvegarde.' })) }
+    finally { setSaving(s => ({ ...s, [id]: false })) }
+  }
 
-  const handleTest = async () => {
-    setTesting(true); setTestResult(null)
-    try { const res = await testFinnhubKey(); setTestResult(res.data) }
-    catch { setTestResult({ success: false, message: 'Erreur de connexion.' }) }
-    finally { setTesting(false) }
+  const handleDelete = async (id, deleteFn) => {
+    if (!window.confirm('Supprimer cette clé API ?')) return
+    setDeleting(d => ({ ...d, [id]: true }))
+    try { await deleteFn(); await refresh() }
+    catch {}
+    finally { setDeleting(d => ({ ...d, [id]: false })) }
+  }
+
+  const handleTest = async (id, testFn) => {
+    setTesting(t => ({ ...t, [id]: true }))
+    setTestResults(r => ({ ...r, [id]: null }))
+    try {
+      const res = await testFn()
+      setTestResults(r => ({ ...r, [id]: res.data }))
+    } catch {
+      setTestResults(r => ({ ...r, [id]: { success: false, message: 'Erreur réseau.' } }))
+    } finally { setTesting(t => ({ ...t, [id]: false })) }
   }
 
   if (!isOpen) return null
+
+  const KeySection = ({ id, title, description, link, linkText, isConfigured, updateFn, deleteFn, testFn }) => (
+    <div className="border rounded-lg p-4 mb-4">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{title}</p>
+        <div className={`flex items-center gap-1.5 text-xs font-medium ${isConfigured ? 'text-green-600' : 'text-gray-400'}`}>
+          <span className={`w-2 h-2 rounded-full ${isConfigured ? 'bg-green-500' : 'bg-gray-300'}`} />
+          {isConfigured ? 'Configurée' : 'Non configurée'}
+        </div>
+      </div>
+      {description && <p className="text-xs text-gray-400 mb-3">{description}</p>}
+
+      {/* Champ de saisie */}
+      <div className="flex gap-2 mb-2">
+        <div className="relative flex-1">
+          <input
+            type={show[id] ? 'text' : 'password'}
+            placeholder={isConfigured ? '••••••••• (remplacer)' : 'Collez votre clé ici'}
+            value={keys[id]}
+            onChange={e => setKeys(k => ({ ...k, [id]: e.target.value }))}
+            className="w-full px-3 py-2 pr-16 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+          />
+          {/* Fix Voir/Cacher : onMouseDown preventDefault empêche le blur avant le click */}
+          <button
+            type="button"
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => setShow(s => ({ ...s, [id]: !s[id] }))}
+            className="absolute right-2 top-2 text-xs text-gray-400 hover:text-gray-700 px-1 py-0.5 rounded"
+          >
+            {show[id] ? 'Cacher' : 'Voir'}
+          </button>
+        </div>
+        <button onClick={() => handleSave(id, updateFn)}
+          disabled={!keys[id].trim() || saving[id]}
+          className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 text-sm font-medium whitespace-nowrap">
+          {saving[id] ? '…' : 'Sauvegarder'}
+        </button>
+      </div>
+
+      {savedMsg[id] && (
+        <p className={`text-xs mb-2 ${savedMsg[id].includes('Erreur') ? 'text-red-600' : 'text-green-600'}`}>
+          {savedMsg[id]}
+        </p>
+      )}
+
+      {/* Actions : test + supprimer */}
+      <div className="flex gap-2">
+        {testFn && (
+          <button onClick={() => handleTest(id, testFn)}
+            disabled={testing[id] || !isConfigured}
+            className="flex-1 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40">
+            {testing[id] ? 'Test…' : '🔌 Tester la connexion'}
+          </button>
+        )}
+        {link && (
+          <a href={link} target="_blank" rel="noreferrer"
+            className="flex-1 py-1.5 text-center border border-gray-200 rounded-lg text-xs text-blue-600 hover:bg-blue-50">
+            {linkText} →
+          </a>
+        )}
+        {isConfigured && deleteFn && (
+          <button onClick={() => handleDelete(id, deleteFn)}
+            disabled={deleting[id]}
+            className="py-1.5 px-3 border border-red-200 rounded-lg text-xs text-red-500 hover:bg-red-50 disabled:opacity-40">
+            {deleting[id] ? '…' : '🗑'}
+          </button>
+        )}
+      </div>
+
+      {testResults[id] && (
+        <div className={`mt-2 p-2 rounded text-xs ${testResults[id].success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+          {testResults[id].success ? '✓ ' : '✗ '}{testResults[id].message}
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 max-w-lg w-full shadow-xl overflow-y-auto max-h-[90vh]">
         <h2 className="text-2xl font-bold mb-1">Paramètres</h2>
         <p className="text-sm text-gray-500 mb-5">
-          Les clés sont stockées localement dans votre base de données — elles ne quittent jamais votre machine.
+          Clés stockées dans votre base de données locale — elles ne quittent jamais votre machine.
         </p>
 
-        {/* Finnhub — prix des actifs */}
-        <div className="border rounded-lg p-4 mb-4">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Prix des actifs</p>
-          <ApiKeyField
-            label="Clé Finnhub" configuredKey={status.finnhub_configured}
-            link="https://finnhub.io" linkText="Clé gratuite"
-            updateFn={async (k) => { await updateFinnhubKey(k); refresh() }}
-          />
-          <button onClick={handleTest} disabled={testing || !status.finnhub_configured}
-            className="w-full py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40">
-            {testing ? 'Test en cours…' : 'Tester la connexion Finnhub'}
-          </button>
-          {testResult && (
-            <div className={`mt-2 p-2 rounded text-xs ${testResult.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-              {testResult.message}
-            </div>
-          )}
-        </div>
+        <KeySection id="finnhub" title="Prix des actifs" isConfigured={status.finnhub_configured}
+          link="https://finnhub.io" linkText="Clé gratuite"
+          updateFn={updateFinnhubKey} deleteFn={deleteFinnhubKey} testFn={testFinnhubKey} />
 
-        {/* Anthropic — analyse IA */}
-        <div className="border rounded-lg p-4 mb-4">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Analyse IA (Claude)</p>
-          <p className="text-xs text-gray-400 mb-3">
-            Utilisé pour analyser les actualités et générer des recommandations en français.
-            Modèle : claude-haiku (~0.001 €/analyse). Crédits offerts à l'inscription.
-          </p>
-          <ApiKeyField
-            label="Clé Anthropic" configuredKey={status.anthropic_configured}
-            link="https://console.anthropic.com" linkText="Obtenir une clé"
-            updateFn={async (k) => { await updateAnthropicKey(k); refresh() }}
-          />
-        </div>
+        <KeySection id="anthropic" title="Analyse IA (Claude)"
+          description="Analyse les actualités et génère des recommandations en français. Modèle : claude-haiku (~0.001 €/analyse). $5 de crédits offerts à l'inscription."
+          isConfigured={status.anthropic_configured}
+          link="https://console.anthropic.com" linkText="console.anthropic.com"
+          updateFn={updateAnthropicKey} deleteFn={deleteAnthropicKey} testFn={testAnthropicKey} />
 
-        {/* NewsAPI — actualités */}
-        <div className="border rounded-lg p-4 mb-5">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Actualités (NewsAPI)</p>
-          <p className="text-xs text-gray-400 mb-3">
-            Source d'actualités financières. Gratuit jusqu'à 100 requêtes/jour — largement suffisant.
-          </p>
-          <ApiKeyField
-            label="Clé NewsAPI" configuredKey={status.newsapi_configured}
-            link="https://newsapi.org/register" linkText="Clé gratuite"
-            updateFn={async (k) => { await updateNewsApiKey(k); refresh() }}
-          />
-        </div>
+        <KeySection id="newsapi" title="Actualités (NewsAPI)"
+          description="Gratuit jusqu'à 100 requêtes/jour. Recherche par nom d'actif → couvre les ETF européens."
+          isConfigured={status.newsapi_configured}
+          link="https://newsapi.org/register" linkText="Clé gratuite"
+          updateFn={updateNewsApiKey} deleteFn={deleteNewsApiKey} testFn={testNewsApiKey} />
 
         <button onClick={onClose} className="w-full py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">
           Fermer
