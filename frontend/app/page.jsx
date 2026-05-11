@@ -66,7 +66,6 @@ export default function Home() {
     { id: 'consolidated', label: 'Par titre' },
     { id: 'positions',    label: 'Ordres passés' },
     { id: 'assets',       label: 'Actifs suivis' },
-    { id: 'news',         label: '✨ Actualités & IA' },
   ]
 
   const handleDeleteAsset = async (symbol) => {
@@ -170,7 +169,6 @@ export default function Home() {
               <div className={activeTab !== 'assets'        ? 'hidden' : ''}>
                 <AssetsList assets={assets} onDelete={handleDeleteAsset} />
               </div>
-              <div className={activeTab !== 'news'         ? 'hidden' : ''}><NewsRecommendations /></div>
             </div>
 
             {activeTab !== 'news' && <TopPerformers topGainer={portfolio.top_gainer} topLoser={portfolio.top_loser} />}

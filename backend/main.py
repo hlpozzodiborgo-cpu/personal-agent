@@ -24,11 +24,14 @@ from finance_service import FinanceService
 from ai_service import AIService
 from news_service import NewsService
 from routes_news import router as news_router
+from agent.router import router as agent_router
+from agent.models import AgentBase
 
 # Database
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(bind=engine)
+AgentBase.metadata.create_all(bind=engine)   # agent tables — does not touch Phase 1 tables
 
 # Migration: ajout de la colonne purchase_date si absente
 from sqlalchemy import text
@@ -63,6 +66,7 @@ app = FastAPI(
     version="2.0.0"
 )
 app.include_router(news_router)
+app.include_router(agent_router)
 
 # CORS
 app.add_middleware(
