@@ -201,3 +201,11 @@ class PipelineRunResponse(BaseModel):
     theses_generated:       int
     recommendations_ready:  int
     errors:                 List[str] = []
+
+class IngestRequest(BaseModel):
+    tickers: Optional[List[str]] = None
+
+class IngestResponse(BaseModel):
+    fetched:      int
+    after_dedupe: int
+    persisted:    int

@@ -9,3 +9,5 @@ requests>=2.31.0
 python-dateutil>=2.8.2
 anthropic>=0.40.0
 vaderSentiment>=3.3.2
+httpx>=0.25
+pytest>=7.4
