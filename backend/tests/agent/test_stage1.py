@@ -207,3 +207,71 @@ class TestClassifyEvent:
     def test_sport_not_classified_as_macro(self):
         """'Pirates' must not trigger the macro keyword 'rate'."""
         assert classify_event("Rockies vs Pirates Series May 12", "") == "other"
+
+
+# ---------------------------------------------------------------------------
+# YFinance source tests
+# ---------------------------------------------------------------------------
+
+import time as _time
+
+from agent.sources.yfinance import YFinanceSource
+
+
+class TestYFinanceSource:
+    def test_returns_articles_within_time_window(self):
+        """Articles older than hours_back must be filtered out."""
+        now = int(_time.time())
+        mock_news = [
+            {
+                "title": "Apple beats Q3 earnings",
+                "link":  "https://reuters.com/article/apple-earnings",
+                "providerPublishTime": now - 3600,    # 1h ago — inside 24h window
+            },
+            {
+                "title": "Old Apple story from two days ago",
+                "link":  "https://reuters.com/article/apple-old",
+                "providerPublishTime": now - 48 * 3600,  # 48h ago — outside window
+            },
+        ]
+        with patch("agent.sources.yfinance.yf.Ticker") as MockTicker:
+            MockTicker.return_value.news = mock_news
+            result = asyncio.run(YFinanceSource().fetch(["AAPL"], hours_back=24))
+
+        assert len(result) == 1
+        assert result[0]["title"] == "Apple beats Q3 earnings"
+
+    def test_handles_ticker_failure_gracefully(self):
+        """A failing ticker must not block the others."""
+        now = int(_time.time())
+
+        def _ticker_factory(sym: str):
+            if sym == "BAD":
+                raise Exception("unknown ticker BAD")
+            m = MagicMock()
+            m.news = [{
+                "title": "AAPL news headline",
+                "link":  "https://cnbc.com/aapl-news",
+                "providerPublishTime": now - 3600,
+            }]
+            return m
+
+        with patch("agent.sources.yfinance.yf.Ticker", side_effect=_ticker_factory):
+            result = asyncio.run(YFinanceSource().fetch(["BAD", "AAPL"], hours_back=24))
+
+        assert len(result) == 1
+        assert result[0]["title"] == "AAPL news headline"
+
+    def test_extracts_domain_from_link(self):
+        """The source field must be the bare domain without www. prefix."""
+        now = int(_time.time())
+        mock_news = [{
+            "title": "Apple supply chain update",
+            "link":  "https://www.reuters.com/article/apple-supply-chain",
+            "providerPublishTime": now - 3600,
+        }]
+        with patch("agent.sources.yfinance.yf.Ticker") as MockTicker:
+            MockTicker.return_value.news = mock_news
+            result = asyncio.run(YFinanceSource().fetch(["AAPL"], hours_back=24))
+
+        assert result[0]["source"] == "reuters.com"

@@ -51,5 +51,13 @@ SOURCE_TIERS: dict[str, int] = {
     "forbes.com":        2,
     "businessinsider.com": 2,
     "gdelt":             3,  # generic GDELT source placeholder
+    # Yahoo Finance sources
+    "finance.yahoo.com": 2,
+    "yahoo.com":         2,
+    "youtube.com":       5,
+    "fool.com":          3,
+    "investorplace.com": 3,
+    "barrons.com":       1,
+    "thestreet.com":     3,
     "default":           3,
 }

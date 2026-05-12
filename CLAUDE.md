@@ -169,6 +169,9 @@ Additions to `backend/main.py` must be surgical: import the agent router and cal
 
 ## Agent module: key design decisions
 
+- **Sources actives Stage 1** (liste dans `agent/stage1_ingest.py::SOURCES`) :
+  - gdelt (default_tier=3, search-term-based, no API key)
+  - yfinance (default_tier=2, ticker-based, no API key)
 - **Isolated Base**: `AgentBase = declarative_base()` in `agent/models.py`. Never import from Phase 1 `models.py`.
 - **JSON columns**: use `sqlalchemy.JSON` for list/dict fields (SQLite stores as text, SQLAlchemy handles serialisation).
 - **String enums**: use plain `String` columns with docstring listing valid values (matches existing codebase; no SQLAlchemy `Enum` type to avoid migration complexity).

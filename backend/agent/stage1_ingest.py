@@ -31,12 +31,13 @@ from agent.models import RawArticle
 from agent.sources.aliases import TICKER_ALIASES, SOURCE_TIERS, alias_to_ticker
 from agent.sources.base import NewsSource
 from agent.sources.gdelt import GDELTSource
+from agent.sources.yfinance import YFinanceSource
 
 # ---------------------------------------------------------------------------
 # Sources actives — ajouter une nouvelle source ici uniquement
 # ---------------------------------------------------------------------------
 
-SOURCES: list[NewsSource] = [GDELTSource()]
+SOURCES: list[NewsSource] = [GDELTSource(), YFinanceSource()]
 
 logger = logging.getLogger(__name__)
 
@@ -339,8 +340,11 @@ async def run(
     per_source_counts: dict[str, int] = {}
 
     for src in SOURCES:
+        # YFinance s'attend à des symboles bruts ; les autres sources (GDELT)
+        # s'attendent à des search_terms (noms d'entreprise).
+        query_input = tickers if src.name == "yfinance" else search_terms
         try:
-            articles = await src.fetch(search_terms, hours_back=lookback_hours)
+            articles = await src.fetch(query_input, hours_back=lookback_hours)
             for art in articles:
                 art.setdefault("_default_tier", src.default_tier)
             all_articles.extend(articles)
