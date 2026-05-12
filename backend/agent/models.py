@@ -47,6 +47,7 @@ class RawArticle(AgentBase):
     tickers      = Column(JSON, nullable=True)                   # list[str]
     event_type   = Column(String, nullable=True)
     raw_sentiment= Column(Float, nullable=True)                  # [-1, 1]
+    processed_at = Column(DateTime, nullable=True, index=True)   # Stage 2 timestamp
 
 
 # ---------------------------------------------------------------------------

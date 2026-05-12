@@ -210,3 +210,35 @@ class IngestResponse(BaseModel):
     after_dedupe: int
     persisted:    int
     per_source:   Dict[str, int] = {}
+
+
+# ---------------------------------------------------------------------------
+# Stage 2 — Signals
+# ---------------------------------------------------------------------------
+
+class SignalsRunRequest(BaseModel):
+    lookback_hours: int = 48
+
+class SignalsRunResponse(BaseModel):
+    articles_processed: int
+    clusters_total:     int
+    signals_created:    int
+    by_strength:        Dict[str, int]
+    discarded_weak:     int
+
+class SignalRead(BaseModel):
+    id:              int
+    cluster_id:      Optional[str] = None
+    strength:        str
+    volume:          int
+    velocity:        Optional[float] = None
+    authority_score: Optional[float] = None
+    novelty_score:   Optional[float] = None
+    summary:         Optional[str] = None
+    ticker_primary:  Optional[str] = None
+    tickers:         Optional[List[str]] = None
+    status:          str
+    created_at:      datetime
+
+    class Config:
+        from_attributes = True

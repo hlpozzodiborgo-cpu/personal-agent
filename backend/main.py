@@ -41,6 +41,11 @@ with engine.connect() as _conn:
         _conn.commit()
     except Exception:
         pass
+    try:
+        _conn.execute(text("ALTER TABLE raw_articles ADD COLUMN processed_at DATETIME"))
+        _conn.commit()
+    except Exception:
+        pass
 
 # Charger toutes les cles API depuis la DB (priorite sur le .env)
 _startup_db = SessionLocal()
