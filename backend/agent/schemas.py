@@ -209,3 +209,4 @@ class IngestResponse(BaseModel):
     fetched:      int
     after_dedupe: int
     persisted:    int
+    per_source:   Dict[str, int] = {}

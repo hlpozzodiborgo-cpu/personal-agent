@@ -1,17 +1,19 @@
 """
 Stage 1 — Ingest
 
-Collecte des articles bruts depuis GDELT (source unique pour l'instant).
+Collecte les articles bruts depuis toutes les sources configurées dans SOURCES.
+Chaque source implémente NewsSource (agent/sources/base.py). Ajouter une
+source = l'instancier dans SOURCES, sans toucher au reste du pipeline.
 
 Responsabilités :
-- Interroger GDELT Doc 2.0 pour les symboles du portefeuille
-- Déduplication par URL canonique puis par hash du titre
-- Attribution du source_tier basée sur SOURCE_TIERS
+- Interroger chaque source pour les symboles du portefeuille
+- Déduplication inter-sources par URL canonique puis hash de titre
+- Attribution du source_tier (SOURCE_TIERS ou default_tier de la source)
 - Extraction préliminaire des tickers mentionnés (regex + alias)
 - Score de sentiment rapide via VADER (< 1 ms par article, pas de LLM)
 
 Input  : liste de symboles du portefeuille (optionnel) + fenêtre temporelle
-Output : dict {fetched, after_dedupe, persisted}
+Output : dict {fetched, after_dedupe, persisted, per_source}
 """
 from __future__ import annotations
 
@@ -27,7 +29,14 @@ from sqlalchemy.orm import Session
 
 from agent.models import RawArticle
 from agent.sources.aliases import TICKER_ALIASES, SOURCE_TIERS, alias_to_ticker
-from agent.sources.gdelt import fetch_recent_articles
+from agent.sources.base import NewsSource
+from agent.sources.gdelt import GDELTSource
+
+# ---------------------------------------------------------------------------
+# Sources actives — ajouter une nouvelle source ici uniquement
+# ---------------------------------------------------------------------------
+
+SOURCES: list[NewsSource] = [GDELTSource()]
 
 logger = logging.getLogger(__name__)
 
@@ -251,7 +260,12 @@ def persist_articles(db: Session, articles: list[dict], known_symbols: list[str]
             continue
 
         domain = art.get("source", "")
-        tier = SOURCE_TIERS.get(domain, SOURCE_TIERS["default"])
+        # Utilise le tier spécifique au domaine, puis le default_tier de la
+        # source, puis le fallback global.
+        tier = SOURCE_TIERS.get(
+            domain,
+            art.get("_default_tier", SOURCE_TIERS["default"]),
+        )
         tickers = extract_tickers(art.get("title", ""), known_symbols)
 
         if not is_financially_relevant(art.get("title", ""), tickers):
@@ -287,9 +301,18 @@ def persist_articles(db: Session, articles: list[dict], known_symbols: list[str]
     return count
 
 
-# Tickers utilisés quand aucun portefeuille n'est fourni — 5 max pour
-# rester dans les limites de la query GDELT.
-TOP_DEFAULT_TICKERS = ["AAPL", "MSFT", "NVDA", "GOOGL", "MC.PA"]
+# ---------------------------------------------------------------------------
+# Search term construction
+# ---------------------------------------------------------------------------
+
+def _build_search_terms(tickers: list[str]) -> list[str]:
+    """Convertit les symboles en noms d'entreprise pour les sources textuelles."""
+    terms: list[str] = []
+    for ticker in tickers:
+        aliases = TICKER_ALIASES.get(ticker, [])
+        terms.extend(aliases[:2])
+    terms = [t for t in terms if len(t) >= 4]
+    return terms or tickers  # fallback si aucun alias connu
 
 
 # ---------------------------------------------------------------------------
@@ -302,35 +325,41 @@ async def run(
     lookback_hours: int = 24,
 ) -> dict:
     """
-    Lance la collecte d'articles GDELT et retourne les compteurs.
+    Lance la collecte depuis toutes les sources dans SOURCES.
 
     Returns:
-        {"fetched": int, "after_dedupe": int, "persisted": int}
+        {"fetched": int, "after_dedupe": int, "persisted": int,
+         "per_source": {source_name: article_count}}
     """
-    tickers = portfolio_symbols or TOP_DEFAULT_TICKERS
+    tickers = portfolio_symbols or list(TICKER_ALIASES.keys())[:5]
+    search_terms = _build_search_terms(tickers)
+    logger.info("Stage 1: tickers=%s search_terms=%s", tickers, search_terms)
 
-    # Construire les termes de recherche à partir des alias (noms d'entreprise)
-    # plutôt que des symboles bruts qui n'apparaissent pas dans les articles.
-    search_terms: list[str] = []
-    for ticker in tickers:
-        aliases = TICKER_ALIASES.get(ticker, [])
-        search_terms.extend(aliases[:2])
-    search_terms = [t for t in search_terms if len(t) >= 4]
-    if not search_terms:
-        search_terms = tickers  # fallback si aucun alias connu
+    all_articles: list[dict] = []
+    per_source_counts: dict[str, int] = {}
 
-    logger.info("Stage 1: search_terms = %s", search_terms)
+    for src in SOURCES:
+        try:
+            articles = await src.fetch(search_terms, hours_back=lookback_hours)
+            for art in articles:
+                art.setdefault("_default_tier", src.default_tier)
+            all_articles.extend(articles)
+            per_source_counts[src.name] = len(articles)
+            logger.info("Source %s: %d articles", src.name, len(articles))
+        except Exception as exc:
+            logger.warning("Source %s failed: %s — skipping", src.name, exc)
+            per_source_counts[src.name] = 0
 
-    raw = await fetch_recent_articles(search_terms, hours_back=lookback_hours)
-    deduped = dedupe_articles(raw)
+    deduped = dedupe_articles(all_articles)
     persisted = persist_articles(db, deduped, tickers)
 
     result = {
-        "fetched":      len(raw),
+        "fetched":      len(all_articles),
         "after_dedupe": len(deduped),
         "persisted":    persisted,
+        "per_source":   per_source_counts,
     }
-    logger.info("Stage 1 ingest complete: %s", result)
+    logger.info("Stage 1 complete: %s", result)
     return result
 
 
