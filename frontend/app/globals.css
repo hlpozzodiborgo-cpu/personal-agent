@@ -2,18 +2,73 @@
 @tailwind components;
 @tailwind utilities;
 
-html {
-  scroll-behavior: smooth;
+:root {
+  --gold: #C9A84C;
+  --gold-light: #E2C878;
+  --gold-dark: #A8893A;
+  --bg: #0A0A0A;
+  --surface: #111111;
+  --surface-2: #1A1A1A;
+  --surface-3: #222222;
+  --border: #2A2A2A;
+  --border-light: #333333;
+  --text: #FFFFFF;
+  --text-muted: #9CA3AF;
+  --text-faint: #6B7280;
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+* {
+  box-sizing: border-box;
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+html, body {
+  background-color: #0A0A0A;
+  color: #FFFFFF;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
+
+/* Scrollbar dark */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #111111; }
+::-webkit-scrollbar-thumb { background: #2A2A2A; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #C9A84C; }
+
+/* Select dark */
+select {
+  background-color: #1A1A1A;
+  color: #FFFFFF;
+  border-color: #2A2A2A;
+}
+select option {
+  background-color: #1A1A1A;
+  color: #FFFFFF;
+}
+
+/* Recharts dark overrides */
+.recharts-text { fill: #9CA3AF !important; }
+.recharts-cartesian-axis-tick-value { fill: #9CA3AF !important; }
+.recharts-legend-item-text { color: #9CA3AF !important; }
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: #1A1A1A !important;
+  border-color: #2A2A2A !important;
+  color: #FFFFFF !important;
+}
+
+/* Gold button utility */
+.btn-gold {
+  background-color: #C9A84C;
+  color: #000000;
+  font-weight: 600;
+  transition: background-color 0.15s;
+}
+.btn-gold:hover { background-color: #D4AF37; }
+.btn-gold:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-ghost {
+  background-color: transparent;
+  color: #C9A84C;
+  border: 1px solid #C9A84C;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+.btn-ghost:hover { background-color: rgba(201,168,76,0.1); }
